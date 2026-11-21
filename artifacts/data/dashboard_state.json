@@ -1,0 +1,52 @@
+{
+  "steps": {
+    "1": {
+      "status": "success",
+      "finishedAt": "2026-11-03T06:07:05.453Z",
+      "durationMs": 5723,
+      "rowsWritten": 5284,
+      "message": "Wrote 5284 dynamic Home/Away rows (5284 game rows) to NBA-Astro_Input and NBA-Astro_Header_Input",
+      "error": null
+    },
+    "2": {
+      "status": "success",
+      "finishedAt": "2026-11-03T06:07:22.563Z",
+      "durationMs": 12576,
+      "rowsWritten": 68692,
+      "message": "Wrote 68692 aspect rows from 5284 inputs",
+      "error": null
+    },
+    "3": {
+      "status": "success",
+      "finishedAt": "2026-11-03T06:08:38.900Z",
+      "durationMs": 72222,
+      "rowsWritten": 68692,
+      "message": "Wrote 68692 Result Degree rows; 5284 Node_Output rows; applied 0/61720 color formats; (formatting skipped)",
+      "error": null
+    },
+    "4": {
+      "status": "success",
+      "finishedAt": "2026-11-03T06:09:25.514Z",
+      "durationMs": 40936,
+      "rowsWritten": null,
+      "message": null,
+      "error": null
+    },
+    "5": {
+      "status": "success",
+      "finishedAt": "2026-05-09T03:19:40.623Z",
+      "durationMs": 2329,
+      "rowsWritten": 1,
+      "message": "Updated row 9 (date 2026-05-09, signal UP)",
+      "error": null
+    },
+    "6": {
+      "status": "success",
+      "finishedAt": "2026-10-13T03:01:37.700Z",
+      "durationMs": 3381,
+      "rowsWritten": 24,
+      "message": "Wrote 24 WEEKLY-OUTPUT rows; from 168 Node_Output daily rows; applied 24/24 color formats",
+      "error": null
+    }
+  }
+}

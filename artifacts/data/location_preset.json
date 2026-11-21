@@ -1,0 +1,11 @@
+{
+  "presetId": "nba-auto-team-arena",
+  "label": "NBA Auto — Each Team's Own Home Arena & Timezone (from NBA-GEM)",
+  "lat": 40.750513,
+  "lon": -73.993516,
+  "time": "19:30",
+  "tz": "AUTO",
+  "appliedAt": "2026-11-02T02:18:22.514Z",
+  "rowsWritten": 14,
+  "message": "Applied preset 'NBA Auto — Each Team's Own Home Arena & Timezone (from NBA-GEM)' to 14 rows (Time/Zone/Lat/Lon)"
+}
