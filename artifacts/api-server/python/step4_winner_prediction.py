@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Step 4: NBA Calculation Builder (Sheet1 + Sheet3 + Game_Predictions)
-Reads NBA-Result-Degree :: Node_Output (1MqZL-5y7k5aQOYjfHdtnsRrBPviF811gnVGp8IggdtQ),
+Reads NHL-Result-Degree :: Node_Output (env NHL_RESULT_DEGREE_SHEET_ID),
 executes the complete deterministic calculation pipeline of Nba-Calculation-1.xlsm:
   1) Sheet1 (116 columns A:DL — SPLIT_NUMBER, SPE_DIGIT, GEOMANCYFULL, ELE-P,
      Get_Day_Element, DigitalSum, ELE-DIGSUM, ELE-P-DIGSUM, DATE_SPLIT,
@@ -14,7 +14,7 @@ executes the complete deterministic calculation pipeline of Nba-Calculation-1.xl
      QULITY-GD-CARD, QULITY-RULER, 6-Rule Votes & Winner Determination)
   3) Game_Predictions (30 columns A:AD — Paired Home vs Away summary, VM6 score,
      and 80%–85.7% Fixed Pattern Tiers)
-Writes outputs to NBA-Calculation (1yi4rNBwT4iktcZms_lEJNJ-SPNQ9Kc0d-6AeX9KzikA)
+Writes outputs to NHL-PLAYER-CALCULATION (env NHL_PLAYER_CALC_SHEET_ID)
 and NBA-Result-Degree :: Game_Predictions.
 """
 import os, sys, json, re, time
@@ -22,8 +22,9 @@ import os, sys, json, re, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _lib.sheets import open_sheet
 
-SS_RD   = "1MqZL-5y7k5aQOYjfHdtnsRrBPviF811gnVGp8IggdtQ"
-SS_CALC = "1yi4rNBwT4iktcZms_lEJNJ-SPNQ9Kc0d-6AeX9KzikA"
+import os
+SS_RD   = os.environ.get("NHL_RESULT_DEGREE_SHEET_ID", "")
+SS_CALC = os.environ.get("NHL_PLAYER_CALC_SHEET_ID", "")
 
 GEO_NAMES = {
     0: "Populus (0000)", 1: "Tristitia (0001)", 2: "Albus (0010)", 3: "Fortuna Major (0011)",

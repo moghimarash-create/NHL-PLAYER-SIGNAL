@@ -538,10 +538,10 @@ def run() -> dict:
     token = _mint_token()
     disabled_markets = _parse_disabled_markets(sys.argv[1:])
 
-    SEARCH_SIGNALS_ID = "1oQhRX2ZsLVlPDV2y0ToA7BfMdtblbh9ygav2yMpzj1k"
-    DATA_SEARCH_KEY_ID = "1C51kkj4mcQX5kLvZe_TlmdwxKNf4pagtvMqU2pZjXzU"
-    FINAL_SIGNAL_ID = "1RX-sKBwgt3KghRH-CuL_fCOmJND6dKnx1ORX44SkOfc"
-    PREDICTION_FINAL_ID = "1KlO8ooyXURexeDqNN8KVFGflNBaX7HIj8GCLk9-WY4o"
+    SEARCH_SIGNALS_ID = os.environ.get("NHL_SEARCH_SIGNALS_SHEET_ID", "")
+    DATA_SEARCH_KEY_ID = os.environ.get("NHL_DATA_SEARCH_KEY_SHEET_ID", "")
+    FINAL_SIGNAL_ID = os.environ.get("NHL_FINAL_SIGNAL_SHEET_ID", "")
+    PREDICTION_FINAL_ID = os.environ.get("NHL_PREDICTION_FINAL_SHEET_ID", "")
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
     def read_sheet(sid, r):

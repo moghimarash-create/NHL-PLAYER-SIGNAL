@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """
 Exact Parity Verification + Full 2010-2027 NHL Player Astrological & Elemental Engine
+Base Constant: DEG1 = 88 (28 GEMINI / AIR)
 Benchmarks:
   - Mode A (JERSEY_NAME):   DEG1=88, DEG2=egem(Full_Name)%360, DEG3=egem(Jersey_Name)%360
   - Mode B (NAME_PLUS_NO):  DEG1=88, DEG2=egem(Full_Name)%360, DEG3=(egem(Jersey_Name)+JerseyNoEff)%360
   - Mode C (JERSEY_NO):     DEG1=88, DEG2=egem(Full_Name)%360, DEG3=JerseyNoEff%360
 """
+DEG1_BASE = 88  # 28 GEMINI / Element AIR
 import sys, os, types, json, math, time, datetime, unicodedata, bisect
 from collections import defaultdict
 import numpy as np

@@ -1,0 +1,60 @@
+{
+  "spreadsheetTitle": "NHL-PLAYERS-GEOMANTIC-INPUT (Local JSON Backup)",
+  "sheetIdEnvVar": "NHL_PLAYER_INPUT_SHEET_ID",
+  "configuredSheetId": null,
+  "deg1": 88,
+  "deg1Sign": "28 GEMINI",
+  "deg1Element": "AIR",
+  "targetDate": "2026-11-18",
+  "updatedAt": "2026-11-21T06:37:32.634708+00:00",
+  "tabs": {
+    "Sheet1": [
+      [
+        "DATE",
+        "WEEKDAY",
+        "DEG1",
+        "DEG1_SIGN",
+        "HOME_TEAM",
+        "AWAY_TEAM",
+        "ARENA",
+        "PUCKDROP_LOCAL",
+        "DEG3_MODE"
+      ],
+      [
+        "2026-11-18",
+        "WEDNESDAY",
+        88,
+        "28 GEMINI (AIR)",
+        "Detroit Red Wings",
+        "Boston Bruins",
+        "Little Caesars Arena",
+        "19:30:00",
+        "MODE_C_JERSEY_NO"
+      ],
+      [
+        "2026-11-18",
+        "WEDNESDAY",
+        88,
+        "28 GEMINI (AIR)",
+        "New Jersey Devils",
+        "Montreal Canadiens",
+        "Prudential Center",
+        "19:30:00",
+        "MODE_C_JERSEY_NO"
+      ],
+      [
+        "2026-11-18",
+        "WEDNESDAY",
+        88,
+        "28 GEMINI (AIR)",
+        "Utah Mammoth",
+        "Colorado Avalanche",
+        "Delta Center",
+        "19:30:00",
+        "MODE_C_JERSEY_NO"
+      ]
+    ],
+    "NHL-PLAYERS-GEM": "nhl_players_gem.json",
+    "TEAMS": "nhl_gem_sheet.json"
+  }
+}

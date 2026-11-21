@@ -24,6 +24,7 @@ DYNAMIC HOME / AWAY LOGIC:
       3. All 30 Teams Home Baseline (HOME_TEAM = "ALL" or blank):
          Produces 30 rows where each team is evaluated in its own home arena.
 """
+import os
 import re
 import sys
 import traceback
@@ -32,9 +33,9 @@ from datetime import datetime, timedelta
 from _lib.runner import emit_result, log
 from _lib.sheets import open_sheet
 
-INPUT_SHEET_ID = "1lFQgTDURItuY0LeIjcTeRRsAZDBHqXQ9j013qNq45o8"
-OUTPUT_SHEET_ID = "1jw2UuFCyQLWCiPZimAmlCInu4Iq-ec149wyI6dJpK-U"
-HEADER_SHEET_ID = "1CewQkD-FFuE6RAtAtosIvC2sLHmAywA4cCx1CSgVvHI"
+INPUT_SHEET_ID = os.environ.get("NHL_PLAYER_INPUT_SHEET_ID", "")
+OUTPUT_SHEET_ID = os.environ.get("NHL_ASTRO_INPUT_SHEET_ID", "")
+HEADER_SHEET_ID = os.environ.get("NHL_ASTRO_HEADER_SHEET_ID", "")
 
 NBA_GEM_TAB = "NBA-GEM"
 import os, json

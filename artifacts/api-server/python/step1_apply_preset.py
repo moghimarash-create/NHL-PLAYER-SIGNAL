@@ -1,65 +1,34 @@
-"""Automatically syncs scheduled NBA games from NBA_SCHEDULE_2025_2027 into NBA-GEOMANTIC-INPUT!Sheet1.
-
-Writes 2 rows per game in Sheet1:
-  - Row 1 (HOME): TEAM = Home Team, HOST_TEAM = Home Team -> DEG2 = Home Team DEG2, ARENA_DEG3 = Host Arena DEG3, EL1/EL2 for Home
-  - Row 2 (AWAY): TEAM = Away Team, HOST_TEAM = Home Team -> DEG2 = Away Team DEG2, ARENA_DEG3 = Host Arena DEG3, EL1/EL2 for Away
+"""Syncs scheduled NHL games (DEG1 = 88 • 28 GEMINI / AIR) from nhl_schedule_2024_2027.json
+into local JSON backup (artifacts/api-server/data/nhl_sheet_input_backup.json) and, ONLY if
+NHL_PLAYER_INPUT_SHEET_ID + GOOGLE_SERVICE_ACCOUNT_JSON are set, into the dedicated NHL Google Sheet.
 """
 import argparse
+import json
+import os
 import re
 import sys
 import traceback
-from datetime import datetime
+from datetime import datetime, timezone
+
 from _lib.runner import emit_result, log
 from _lib.sheets import open_sheet
 
-SPREADSHEET_ID = "1lFQgTDURItuY0LeIjcTeRRsAZDBHqXQ9j013qNq45o8"
-SCHEDULE_TAB = "NBA_SCHEDULE_2025_2027"
-
-TEAM_CODE_DEG2 = {
-    "Denver Nuggets": ("DEN", 59, "29 TAURUS"),
-    "Minnesota Timberwolves": ("MIN", 100, "10 CANCER"),
-    "Oklahoma City Thunder": ("OKC", 110, "20 CANCER"),
-    "Portland Trail Blazers": ("POR", 350, "20 PISCES"),
-    "Utah Jazz": ("UTA", 47, "17 TAURUS"),
-    "Golden State Warriors": ("GSW", 69, "9 GEMINI"),
-    "Los Angeles Clippers": ("LAC", 51, "21 TAURUS"),
-    "LA Clippers": ("LAC", 51, "21 TAURUS"),
-    "Los Angeles Lakers": ("LAL", 61, "1 GEMINI"),
-    "Phoenix Suns": ("PHX", 158, "8 VIRGO"),
-    "Sacramento Kings": ("SAC", 81, "21 GEMINI"),
-    "Dallas Mavericks": ("DAL", 35, "5 TAURUS"),
-    "Houston Rockets": ("HOU", 84, "24 GEMINI"),
-    "Memphis Grizzlies": ("MEM", 85, "25 GEMINI"),
-    "New Orleans Pelicans": ("NOP", 200, "20 LIBRA"),
-    "San Antonio Spurs": ("SAS", 121, "1 LEO"),
-    "Boston Celtics": ("BOS", 132, "12 LEO"),
-    "Brooklyn Nets": ("BKN", 72, "12 GEMINI"),
-    "New York Knicks": ("NYK", 80, "20 GEMINI"),
-    "Philadelphia 76ers": ("PHI", 98, "8 CANCER"),
-    "Toronto Raptors": ("TOR", 310, "10 AQUARIUS"),
-    "Chicago Bulls": ("CHI", 38, "8 TAURUS"),
-    "Cleveland Cavaliers": ("CLE", 55, "25 TAURUS"),
-    "Detroit Pistons": ("DET", 49, "19 TAURUS"),
-    "Indiana Pacers": ("IND", 64, "4 GEMINI"),
-    "Milwaukee Bucks": ("MIL", 80, "20 GEMINI"),
-    "Atlanta Hawks": ("ATL", 71, "11 GEMINI"),
-    "Charlotte Hornets": ("CHA", 29, "29 ARIES"),
-    "Miami Heat": ("MIA", 51, "21 TAURUS"),
-    "Orlando Magic": ("ORL", 300, "0 AQUARIUS"),
-    "Washington Wizards": ("WAS", 67, "7 GEMINI"),
-}
-
+HERE = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = os.path.abspath(os.path.join(HERE, "..", "data"))
+SPREADSHEET_ID = os.environ.get("NHL_PLAYER_INPUT_SHEET_ID", "").strip()
+SCHEDULE_TAB = "NHL_SCHEDULE_2024_2027"
+DEG1_DEFAULT = 88  # 28 GEMINI / Element AIR
 
 WEEKDAY_NUM = {
     "MONDAY": 9, "TUESDAY": 5, "WEDNESDAY": 8,
     "THURSDAY": 4, "FRIDAY": 7, "SATURDAY": 6, "SUNDAY": 3,
 }
 ARCANUM_TO_CARD = {
-    1:  "Scorpio - [Water]",   2:  "Leo - [Fire]",
-    3:  "Gemini - [Air]",      4:  "Aries - [Fire]",
-    5:  "Gemini - [Air]",      6:  "Gemini - [Air]",
-    7:  "Capricorn - [Earth]", 8:  "Libra - [Air]",
-    9:  "Capricorn - [Earth]", 10: "Gemini - [Air]",
+    1: "Scorpio - [Water]",    2: "Leo - [Fire]",
+    3: "Gemini - [Air]",       4: "Aries - [Fire]",
+    5: "Gemini - [Air]",       6: "Gemini - [Air]",
+    7: "Capricorn - [Earth]",  8: "Libra - [Air]",
+    9: "Capricorn - [Earth]",  10: "Gemini - [Air]",
     11: "Taurus - [Earth]",    12: "Cancer - [Water]",
     13: "Gemini - [Air]",      14: "Leo - [Fire]",
     15: "Aries - [Fire]",      16: "Gemini - [Air]",
@@ -68,20 +37,16 @@ ARCANUM_TO_CARD = {
     21: "Aquarius - [Air]",    22: "Virgo - [Earth]",
 }
 ELEMENT_QUALITIES = {
-    "Fire":  ("HOT",  "DRY"),
+    "Fire": ("HOT", "DRY"),
     "Earth": ("COLD", "DRY"),
-    "Air":   ("HOT",  "MOIST"),
+    "Air": ("HOT", "MOIST"),
     "Water": ("COLD", "MOIST"),
 }
 
 
-def sheets_retry(fn, *args, **kwargs):
-    return fn(*args, **kwargs)
-
-
-def _parse_mdy(s: str):
+def _parse_date(s: str) -> str:
     s = str(s or "").strip()
-    for fmt in ("%m/%d/%Y", "%Y-%m-%d", "%m/%d/%y"):
+    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%m/%d/%y"):
         try:
             return datetime.strptime(s, fmt).strftime("%Y-%m-%d")
         except ValueError:
@@ -89,13 +54,9 @@ def _parse_mdy(s: str):
     return ""
 
 
-def _vlookup_formula(col_letter: str, row_idx: int, col_num: int) -> str:
-    return '=IFERROR(VLOOKUP(' + col_letter + str(row_idx) + ", 'NBA-GEM'!$A$2:$Z$31, " + str(col_num) + ', FALSE), "")'
-
-
-def _calc_f_and_el(date_mdy: str, weekday_str: str, deg1: int, deg2: int, deg3: int):
+def _calc_f_and_el(date_ymd: str, weekday_str: str, deg1: int, deg2: int, deg3: int):
     try:
-        m, d, y = [int(x) for x in str(date_mdy).strip().split("/")]
+        y, m, d = [int(x) for x in str(date_ymd).strip().split("-")]
         d_sum = sum(int(c) for c in f"{y:04d}{m:02d}{d:02d}")
     except Exception:
         d_sum = 20
@@ -123,132 +84,82 @@ def _calc_f_and_el(date_mdy: str, weekday_str: str, deg1: int, deg2: int, deg3: 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--start-date", default="2025-01-09")
-    ap.add_argument("--end-date", default="2025-01-12")
+    ap.add_argument("--start-date", default="2026-11-20")
+    ap.add_argument("--end-date", default="2026-11-21")
     ap.add_argument("--utc-control", default="0")
-    ap.add_argument("--deg1", type=int, default=115)
+    ap.add_argument("--deg1", type=int, default=DEG1_DEFAULT)
     ap.add_argument("--deg2-mode", default="full")
-    ap.add_argument("--lat", type=float, default=0.0)
-    ap.add_argument("--lon", type=float, default=0.0)
-    ap.add_argument("--time", default="")
-    ap.add_argument("--tz", default="")
-    ap.add_argument("--label", default="")
     args = ap.parse_args()
 
-    start_ymd = _parse_mdy(args.start_date) or "2025-01-09"
-    end_ymd = _parse_mdy(args.end_date) or start_ymd
+    start_ymd = _parse_date(args.start_date) or "2026-11-20"
+    end_ymd = _parse_date(args.end_date) or start_ymd
     if end_ymd < start_ymd:
         end_ymd = start_ymd
     utc_ctrl = str(args.utc_control).strip() in ("1", "true", "True", "yes")
+    deg1_v = int(args.deg1) if args.deg1 else DEG1_DEFAULT
 
     try:
-        ss = open_sheet(SPREADSHEET_ID)
-        sched_ws = ss.worksheet(SCHEDULE_TAB)
-        sched_rows = sheets_retry(
-            sched_ws.get_values,
-            "A1:T5000",
-            value_render_option="FORMATTED_VALUE",
-        )
-        if not sched_rows or len(sched_rows) < 2:
-            emit_result(ok=False, rows_written=0, error="NBA_SCHEDULE_2025_2027 is empty")
-            return 1
+        gem_raw = json.load(open(os.path.join(HERE, "nhl_gem_sheet.json"), "r", encoding="utf-8"))["values"]
+        team_meta = {}
+        for r in gem_raw[1:]:
+            if r and r[0]:
+                team_meta[str(r[0]).strip()] = {
+                    "deg2_full": int(r[3]),
+                    "arena": str(r[7]),
+                    "deg3_arena": int(r[13]),
+                    "code": str(r[17]),
+                    "lat": str(r[21]),
+                    "lon": str(r[22]),
+                    "tz": str(r[23]),
+                    "deg2_code": int(r[24]),
+                }
 
-        matched = []
-        for r in sched_rows[1:]:
-            if not r or not str(r[0]).strip():
-                continue
-            ymd = _parse_mdy(r[0])
-            if start_ymd <= ymd <= end_ymd:
-                matched.append(r)
-
+        sched_rows = json.load(open(os.path.join(HERE, "nhl_schedule_2024_2027.json"), "r", encoding="utf-8"))["values"]
+        matched = [r for r in sched_rows[1:] if r and start_ymd <= str(r[0]).strip() <= end_ymd]
         if not matched:
-            emit_result(
-                ok=False,
-                rows_written=0,
-                error=f"No NBA games scheduled between {start_ymd} and {end_ymd} in NBA_SCHEDULE_2025_2027",
-            )
+            emit_result(ok=False, rows_written=0, error=f"No NHL games scheduled between {start_ymd} and {end_ymd}")
             return 1
 
+        use_code_deg2 = str(args.deg2_mode).strip().lower() == "code"
         headers = [
-            "DATE", "PRIC-CH", "WEEKDAY", "TEAM", "ROLE", "HOST_TEAM",
-            "DEG1", "DEG2", "ARENA_DEG3",
-            "F", "F2", "F3", "EL1", "EL2",
-            "ARENA_NAME", "Time", "Zone", "Lat", "Lon",
-            "OPPONENT", "TEAM_SCORE", "OPP_SCORE", "WINNER", "GAME_ID"
+            "DATE", "MATCHUP", "WEEKDAY", "TEAM", "ROLE", "HOST_TEAM",
+            "DEG1", "DEG2", "ARENA_DEG3", "F", "F2", "F3", "EL1", "EL2",
+            "ARENA_NAME", "Time", "Zone", "Lat", "Lon", "OPPONENT", "TEAM_SCORE", "OPP_SCORE", "WINNER",
         ]
         out_rows = [headers]
         preview_games = []
-        row_cursor = 2
 
-        for r in matched:
-            while len(r) < 20:
-                r.append("")
-            dt_str = r[0]
-            wk = r[2]
-            home_t = re.sub(r"\s*\([A-Z]{3}\)\s*$", "", str(r[3]).strip())
-            away_t = re.sub(r"\s*\([A-Z]{3}\)\s*$", "", str(r[4]).strip())
-            deg1_v = args.deg1 if args.deg1 else (int(r[5]) if str(r[5]).isdigit() else 115)
-            use_code_deg2 = str(args.deg2_mode).strip().lower() == "code"
-            deg2_vlookup_col = 25 if use_code_deg2 else 4
-            if use_code_deg2 and home_t in TEAM_CODE_DEG2:
-                h_deg2 = TEAM_CODE_DEG2[home_t][1]
-            else:
-                h_deg2 = int(float(r[6])) if str(r[6]).strip() != "" else 0
-            if use_code_deg2 and away_t in TEAM_CODE_DEG2:
-                a_deg2 = TEAM_CODE_DEG2[away_t][1]
-            else:
-                a_deg2 = int(float(r[7])) if str(r[7]).strip() != "" else 0
-            arena_deg3 = int(float(r[8])) if str(r[8]).strip() != "" else 0
-            tm_str = "00:00" if utc_ctrl else r[10]
-            hs = str(r[16]).strip()
-            as_ = str(r[17]).strip()
-            if hs.isdigit() and as_.isdigit() and int(hs) > 0 and int(as_) > 0:
-                hp, ap = int(hs), int(as_)
-                win_nm = home_t if hp > ap else away_t
-                h_pch = f"{home_t} {hp}-{ap} {away_t} ({hp-ap:+d} | WIN: {win_nm})"
-                a_pch = f"{away_t} {ap}-{hp} {home_t} ({ap-hp:+d} | WIN: {win_nm})"
-            else:
-                h_pch = f"{home_t} [HOME] vs {away_t} [AWAY]"
-                a_pch = f"{away_t} [AWAY] @ {home_t} [HOME]"
+        for idx_g, r in enumerate(matched, 1):
+            d_iso, wk, s_lbl, home_t, away_t = str(r[0]), str(r[1]), str(r[2]), str(r[3]), str(r[4])
+            hp, ap, done, arena_in = int(r[5] or 0), int(r[6] or 0), bool(r[7]), str(r[8] or "")
+            hm = team_meta.get(home_t, {})
+            am = team_meta.get(away_t, {})
+            h_deg2 = hm.get("deg2_code" if use_code_deg2 else "deg2_full", 0)
+            a_deg2 = am.get("deg2_code" if use_code_deg2 else "deg2_full", 0)
+            arena_deg3 = hm.get("deg3_arena", 0)
+            arena_nm = arena_in or hm.get("arena", "")
+            tz_str = "UTC" if utc_ctrl else hm.get("tz", "America/New_York")
+            tm_str = "00:00" if utc_ctrl else "19:30"
+            win_nm = (home_t if hp > ap else away_t) if done else ""
 
-            # Row 1: HOME TEAM (DEG2 = Home Team DEG2, ARENA_DEG3 = Host Stadium DEG3)
-            hf1, hf2, hf3, hel1, hel2 = _calc_f_and_el(dt_str, wk, deg1_v, h_deg2, arena_deg3)
-            r_h = row_cursor
+            hf1, hf2, hf3, hel1, hel2 = _calc_f_and_el(d_iso, wk, deg1_v, h_deg2, arena_deg3)
+            af1, af2, af3, ael1, ael2 = _calc_f_and_el(d_iso, wk, deg1_v, a_deg2, arena_deg3)
+
             out_rows.append([
-                dt_str, h_pch, wk, home_t, "HOME", home_t,
-                deg1_v,
-                _vlookup_formula("D", r_h, deg2_vlookup_col),
-                _vlookup_formula("F", r_h, 14),
-                hf1, hf2, hf3, hel1, hel2,
-                _vlookup_formula("F", r_h, 8),
-                tm_str,
-                "UTC" if utc_ctrl else _vlookup_formula("F", r_h, 24),
-                _vlookup_formula("F", r_h, 22),
-                _vlookup_formula("F", r_h, 23),
-                away_t, hs, as_, r[18], r[19],
+                d_iso, f"{home_t} vs {away_t}", wk, home_t, "HOME", home_t,
+                deg1_v, h_deg2, arena_deg3, hf1, hf2, hf3, hel1, hel2,
+                arena_nm, tm_str, tz_str, hm.get("lat", ""), hm.get("lon", ""),
+                away_t, str(hp) if done else "", str(ap) if done else "", win_nm,
             ])
-            row_cursor += 1
-
-            # Row 2: AWAY TEAM (DEG2 = Away Team DEG2, ARENA_DEG3 = Host Stadium DEG3!)
-            af1, af2, af3, ael1, ael2 = _calc_f_and_el(dt_str, wk, deg1_v, a_deg2, arena_deg3)
-            r_a = row_cursor
             out_rows.append([
-                dt_str, a_pch, wk, away_t, "AWAY", home_t,
-                deg1_v,
-                _vlookup_formula("D", r_a, deg2_vlookup_col),
-                _vlookup_formula("F", r_a, 14),
-                af1, af2, af3, ael1, ael2,
-                _vlookup_formula("F", r_a, 8),
-                tm_str,
-                "UTC" if utc_ctrl else _vlookup_formula("F", r_a, 24),
-                _vlookup_formula("F", r_a, 22),
-                _vlookup_formula("F", r_a, 23),
-                home_t, as_, hs, r[18], r[19],
+                d_iso, f"{away_t} @ {home_t}", wk, away_t, "AWAY", home_t,
+                deg1_v, a_deg2, arena_deg3, af1, af2, af3, ael1, ael2,
+                arena_nm, tm_str, tz_str, hm.get("lat", ""), hm.get("lon", ""),
+                home_t, str(ap) if done else "", str(hp) if done else "", win_nm,
             ])
-            row_cursor += 1
 
             preview_games.append({
-                "date": dt_str,
+                "date": d_iso,
                 "weekday": wk,
                 "time": tm_str,
                 "homeTeam": f"{home_t} (EL: {hel1}, {hel2})",
@@ -257,31 +168,46 @@ def main() -> int:
                 "homeDeg2": str(h_deg2),
                 "awayDeg2": str(a_deg2),
                 "arenaDeg3": str(arena_deg3),
-                "arena": r[9],
-                "tz": "UTC" if utc_ctrl else r[11],
-                "lat": r[12],
-                "lon": r[13],
-                "season": r[14],
-                "gameType": r[15],
-                "homeScore": hs,
-                "awayScore": as_,
-                "winner": r[18],
+                "arena": arena_nm,
+                "tz": tz_str,
+                "lat": hm.get("lat", ""),
+                "lon": hm.get("lon", ""),
+                "season": s_lbl,
+                "gameType": "Regular Season",
+                "homeScore": str(hp) if done else "",
+                "awayScore": str(ap) if done else "",
+                "winner": win_nm,
             })
 
-        ws = ss.sheet1
-        sheets_retry(ws.clear)
-        if ws.row_count < len(out_rows) + 10 or ws.col_count < 24:
-            sheets_retry(ws.resize, rows=max(len(out_rows) + 20, 100), cols=24)
-        sheets_retry(
-            ws.update,
-            range_name=f"A1:X{len(out_rows)}",
-            values=out_rows,
-            value_input_option="USER_ENTERED",
+        os.makedirs(DATA_DIR, exist_ok=True)
+        local_backup_path = os.path.join(DATA_DIR, "nhl_preset_sheet1_backup.json")
+        json.dump(
+            {
+                "deg1": deg1_v,
+                "deg1Sign": "28 GEMINI",
+                "deg1Element": "AIR",
+                "startDate": start_ymd,
+                "endDate": end_ymd,
+                "updatedAt": datetime.now(timezone.utc).isoformat(),
+                "rows": out_rows,
+            },
+            open(local_backup_path, "w", encoding="utf-8"),
+            ensure_ascii=False,
+            indent=2,
         )
 
+        synced_remote = False
+        if SPREADSHEET_ID and os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON"):
+            ss = open_sheet(SPREADSHEET_ID)
+            ws = ss.sheet1
+            ws.clear()
+            ws.update(range_name=f"A1:W{len(out_rows)}", values=out_rows, value_input_option="RAW")
+            synced_remote = True
+
         msg = (
-            f"Synced {len(matched)} games ({len(out_rows)-1} Home/Away rows: {start_ymd} to {end_ymd}) "
-            f"into Sheet1 (DEG2 Mode: {'3-Letter Code' if str(args.deg2_mode).strip().lower()=='code' else 'Full Team Name'})"
+            f"Prepared {len(matched)} NHL games ({len(out_rows)-1} Home/Away rows: {start_ymd} to {end_ymd}, "
+            f"DEG1={deg1_v} • 28 GEMINI / AIR) — "
+            f"{'Synced to NHL Google Sheet + Local JSON' if synced_remote else 'Saved to Local JSON Backup (live NBA sheets untouched)'}"
         )
         log(msg)
         emit_result(ok=True, rows_written=len(out_rows) - 1, message=msg, extra={"games": preview_games[:50]})

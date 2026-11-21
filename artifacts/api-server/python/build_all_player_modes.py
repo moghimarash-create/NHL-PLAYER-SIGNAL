@@ -1,62 +1,70 @@
 #!/usr/bin/env python3
 """
-Build & Benchmark All 3 NBA Player Astrological/Elemental Modes (2010-2027, Zero Lookahead):
-  - mode_a: DEG1=53, DEG2=egem(Full_Name)%360, DEG3=egem(Jersey_Name)%360
-  - mode_b: DEG1=53, DEG2=egem(Full_Name)%360, DEG3=(egem(Jersey_Name)+JerseyNoEff)%360
-  - mode_c: DEG1=53, DEG2=egem(Full_Name)%360, DEG3=JerseyNoEff%360
+Build & Benchmark All 3 NHL Player Astrological/Elemental Modes (2010-2027, Zero Lookahead):
+  - Base Constant: DEG1 = 88 (28 GEMINI / Element AIR)
+  - mode_a: DEG1=88, DEG2=egem(Full_Name)%360, DEG3=egem(Jersey_Name)%360
+  - mode_b: DEG1=88, DEG2=egem(Full_Name)%360, DEG3=(egem(Jersey_Name)+JerseyNoEff)%360
+  - mode_c: DEG1=88, DEG2=egem(Full_Name)%360, DEG3=JerseyNoEff%360
+All 32 NHL teams (including Utah Mammoth at Delta Center), TOI-weighted Top-8 active lineup
+with automatic injury exclusion (OUT, IR, IR-LT, IR-NR, Suspension), and 100% preserved
+ELE-P, F30, 3-number array (idx3), 8 active players, and 12-element / 12-player polarity math.
 """
-import sys, os, json, math, time, datetime, bisect
+import bisect
+import datetime
+import json
+import math
+import os
+import sys
+import time
 from collections import defaultdict
+
 import numpy as np
 
+DEG1_BASE = 88  # 28 GEMINI / Element AIR
+DEG1_SIGN = "28 GEMINI"
+DEG1_ELEMENT = "AIR"
+
 HERE = os.path.dirname(os.path.abspath(__file__))
-PUB_DIR = "/home/runner/workspace/artifacts/calc-dashboard/public"
+PUB_DIR = os.path.abspath(os.path.join(HERE, "..", "..", "calc-dashboard", "public"))
+os.makedirs(PUB_DIR, exist_ok=True)
 sys.path.insert(0, HERE)
+import nhl_live_sync as nls
 import parity_check as pc
 
 t0 = time.time()
 
-# 1. Load player bundle, historical games (2010..2026), and schedule (2025..2027)
-pb = json.load(open(os.path.join(HERE, "nba_players_2010_2027.json")))
+# 1. Load NHL player bundle, historical games (2010..2026), and schedule (2024..2027)
+pb = json.load(open(os.path.join(HERE, "nhl_players_2010_2027.json"), "r", encoding="utf-8"))
 player_master = pb["player_master"]
 live_rosters = pb["live_rosters"]
 season_team_players = pb["season_team_players"]
 events_2627 = pb["events_2627"]
 boxscores_2627 = pb["boxscores_2627"]
 
-teams_gem_raw = json.load(open(os.path.join(HERE, "nba_gem_sheet.json")))["values"]
+teams_gem_raw = json.load(open(os.path.join(HERE, "nhl_gem_sheet.json"), "r", encoding="utf-8"))["values"]
 team_tz_map = {}
 team_arena_map = {}
 team_code_map = {}
+team_lat_map = {}
+team_lon_map = {}
 for r in teams_gem_raw[1:]:
     if not r or not str(r[0]).strip():
         continue
     tname = str(r[0]).strip()
     team_arena_map[tname] = str(r[7]).strip()
     team_code_map[tname] = str(r[17]).strip()
+    team_lat_map[tname] = str(r[21]).strip()
+    team_lon_map[tname] = str(r[22]).strip()
     team_tz_map[tname] = str(r[23]).strip() or "America/New_York"
 
-HIST_TEAM_NORM = {
-    "LA Clippers": "Los Angeles Clippers",
-    "New Jersey Nets": "Brooklyn Nets",
-    "Charlotte Bobcats": "Charlotte Hornets",
-    "New Orleans Hornets": "New Orleans Pelicans",
-}
-def norm_team(s):
-    t = str(s or "").strip()
-    return HIST_TEAM_NORM.get(t, t)
+norm_team = nls.norm_team
+season_of_date = nls.season_of_date
+is_inactive_nhl_status = nls.is_inactive_nhl_status
 
-def season_of_date(d_iso):
-    if "2019-10-01" <= d_iso <= "2020-10-15": return "2019-20"
-    if "2020-10-15" < d_iso <= "2021-08-15": return "2020-21"
-    if "2011-12-01" <= d_iso <= "2012-07-01": return "2011-12"
-    y, m, _ = map(int, d_iso.split("-"))
-    return f"{y}-{(y+1)%100:02d}" if m >= 10 else f"{y-1}-{y%100:02d}"
-
-# Merge all games 2010-01-01 .. 2027-04-11
+# Merge all NHL games 2010-01-01 .. 2027-04-10
 games_by_key = {}
 
-hist_vals = json.load(open(os.path.join(HERE, "history_2010_2026_base.json")))["values"]
+hist_vals = json.load(open(os.path.join(HERE, "nhl_history_2010_2026_base.json"), "r", encoding="utf-8"))["values"]
 for r in hist_vals[1:]:
     if len(r) < 9:
         continue
@@ -72,64 +80,69 @@ for r in hist_vals[1:]:
     games_by_key[(d_iso, h, a)] = {
         "d": d_iso, "day": dt.strftime("%A").upper(), "s": season_of_date(d_iso),
         "h": h, "a": a, "hp": hp, "ap": ap, "done": True,
-        "arena": team_arena_map.get(h, ""), "tz": team_tz_map.get(h, "America/New_York")
+        "arena": team_arena_map.get(h, ""),
+        "tz": team_tz_map.get(h, "America/New_York"),
+        "lat": team_lat_map.get(h, ""),
+        "lon": team_lon_map.get(h, ""),
     }
 
-sched_vals = json.load(open(os.path.join(HERE, "schedule_2025_2027.json")))["values"]
+sched_vals = json.load(open(os.path.join(HERE, "nhl_schedule_2024_2027.json"), "r", encoding="utf-8"))["values"]
 for r in sched_vals[1:]:
-    if len(r) < 5:
+    if len(r) < 8:
         continue
-    raw_d = str(r[0]).strip()
-    parts = raw_d.split("/")
-    if len(parts) == 3:
-        d_iso = f"{int(parts[2]):04d}-{int(parts[0]):02d}-{int(parts[1]):02d}"
-    else:
-        d_iso = raw_d
+    d_iso = str(r[0]).strip()
     h = norm_team(r[3])
     a = norm_team(r[4])
     if h not in team_tz_map or a not in team_tz_map:
         continue
-    pch = str(r[1] or "")
-    hp, ap, done = 0, 0, False
-    import re
-    m_sc = re.search(r"(\d+)\s*-\s*(\d+)", pch)
-    if m_sc and "WIN:" in pch:
-        hp, ap = int(m_sc.group(1)), int(m_sc.group(2))
-        done = (hp > 0 and ap > 0 and hp != ap)
+    hp, ap = int(float(r[5] or 0)), int(float(r[6] or 0))
+    done = bool(r[7]) and hp != ap and (hp > 0 or ap > 0)
+    arena_nm = str(r[8]).strip() if len(r) > 8 and r[8] else team_arena_map.get(h, "")
     key = (d_iso, h, a)
     dt = datetime.date(*map(int, d_iso.split("-")))
     if key not in games_by_key:
         games_by_key[key] = {
             "d": d_iso, "day": dt.strftime("%A").upper(), "s": season_of_date(d_iso),
-            "h": h, "a": a, "hp": hp, "ap": ap, "done": done,
-            "arena": str(r[9]).strip() if len(r) > 9 and r[9] else team_arena_map.get(h, ""),
-            "tz": team_tz_map.get(h, "America/New_York")
+            "h": h, "a": a, "hp": hp if done else 0, "ap": ap if done else 0, "done": done,
+            "arena": arena_nm or team_arena_map.get(h, ""),
+            "tz": team_tz_map.get(h, "America/New_York"),
+            "lat": team_lat_map.get(h, ""),
+            "lon": team_lon_map.get(h, ""),
         }
     elif done and not games_by_key[key]["done"]:
         games_by_key[key].update({"hp": hp, "ap": ap, "done": True})
 
-# Apply fresh 2026-27 ESPN scores up through today (2026-11-15)
+# Apply fresh 2026-27 ESPN NHL scores & schedule
 for ev in events_2627:
-    key = (ev["d"], ev["h"], ev["a"])
+    h_ev, a_ev = norm_team(ev["h"]), norm_team(ev["a"])
+    if h_ev not in team_tz_map or a_ev not in team_tz_map:
+        continue
+    key = (ev["d"], h_ev, a_ev)
     dt = datetime.date(*map(int, ev["d"].split("-")))
-    if ev["completed"] and ev["hp"] != ev["ap"] and ev["hp"] > 0:
+    ev_venue = ev.get("venue") or team_arena_map.get(h_ev, "")
+    if ev["completed"] and ev["hp"] != ev["ap"] and (ev["hp"] > 0 or ev["ap"] > 0):
         if key not in games_by_key:
             games_by_key[key] = {
                 "d": ev["d"], "day": dt.strftime("%A").upper(), "s": "2026-27",
-                "h": ev["h"], "a": ev["a"], "hp": ev["hp"], "ap": ev["ap"], "done": True,
-                "arena": team_arena_map.get(ev["h"], ""), "tz": team_tz_map.get(ev["h"], "America/New_York")
+                "h": h_ev, "a": a_ev, "hp": ev["hp"], "ap": ev["ap"], "done": True,
+                "arena": ev_venue, "tz": team_tz_map.get(h_ev, "America/New_York"),
+                "lat": team_lat_map.get(h_ev, ""), "lon": team_lon_map.get(h_ev, ""),
             }
         else:
             games_by_key[key].update({"hp": ev["hp"], "ap": ev["ap"], "done": True})
     elif key not in games_by_key:
         games_by_key[key] = {
             "d": ev["d"], "day": dt.strftime("%A").upper(), "s": "2026-27",
-            "h": ev["h"], "a": ev["a"], "hp": 0, "ap": 0, "done": False,
-            "arena": team_arena_map.get(ev["h"], ""), "tz": team_tz_map.get(ev["h"], "America/New_York")
+            "h": h_ev, "a": a_ev, "hp": 0, "ap": 0, "done": False,
+            "arena": ev_venue, "tz": team_tz_map.get(h_ev, "America/New_York"),
+            "lat": team_lat_map.get(h_ev, ""), "lon": team_lon_map.get(h_ev, ""),
         }
 
 all_games = sorted(games_by_key.values(), key=lambda g: (g["d"], g["h"], g["a"]))
-print(f"Unified game universe: {len(all_games)} games ({sum(1 for g in all_games if g['done'])} completed, {sum(1 for g in all_games if not g['done'])} pending)")
+print(
+    f"Unified NHL game universe: {len(all_games)} games "
+    f"({sum(1 for g in all_games if g['done'])} completed, {sum(1 for g in all_games if not g['done'])} pending)"
+)
 
 # 2. Precompute per-player static metadata (deg2, deg3_a, deg3_b, deg3_c, nam_fawe)
 p_static = {}
@@ -163,37 +176,53 @@ team_box_2627 = defaultdict(list)
 for eid, bobj in boxscores_2627.items():
     d_b = bobj["d"]
     for tname, plist in bobj["box"].items():
-        team_box_2627[tname].append((d_b, plist))
+        team_box_2627[norm_team(tname)].append((d_b, plist))
 for tname in team_box_2627:
     team_box_2627[tname].sort(key=lambda x: x[0])
 
 live_roster_pids = {
-    tname: {p["pid"]: p for p in plist}
+    norm_team(tname): {p["pid"]: p for p in plist}
     for tname, plist in live_rosters.items()
 }
 
+
+def _select_top_lineup_with_goalie_cap(cands_sorted, top_k=8):
+    """Ensure at most 1 goalie (pos == 'G') in a single-game active lineup."""
+    out = []
+    goalie_used = False
+    for pid, toi_val, is_st in cands_sorted:
+        pos = p_static[pid].get("pos", "")
+        if pos == "G":
+            if goalie_used:
+                continue
+            goalie_used = True
+        out.append((pid, toi_val, is_st))
+        if len(out) >= top_k:
+            break
+    return out
+
+
 def get_pregame_lineup(tname, s_lbl, d_iso, is_pending=False, top_k=8):
     """
-    Strictly pre-game active player lineup with minute weights (NO lookahead!).
+    Strictly pre-game active NHL player lineup weighted by mean Time On Ice (TOI) with NO lookahead,
+    automatically excluding injured/suspended players (OUT, IR, IR-LT, IR-NR, Suspension).
     """
     if s_lbl == "2026-27":
         prior_games = [plist for (db, plist) in team_box_2627.get(tname, []) if db < d_iso]
         cur_roster = live_roster_pids.get(tname, {})
-        # Baseline prior MPG from 2025-26 or 2026-27 seasonal table
-        base_mpg = {}
+        base_toi = {}
         for ps in season_team_players.get(f"2025-26||{tname}", []):
-            base_mpg[ps["pid"]] = float(ps.get("mpg", 15.0))
+            base_toi[ps["pid"]] = float(ps.get("toi") or ps.get("mpg") or 16.0)
         if prior_games:
             min_sums = defaultdict(float)
             gp_cnts = defaultdict(int)
             st_cnts = defaultdict(int)
-            # Use last 10 prior games for crisp current rotation
             recent = prior_games[-10:]
             for plist in recent:
                 for pr in plist:
-                    min_sums[pr["pid"]] += pr["min"]
+                    min_sums[pr["pid"]] += float(pr.get("toi") or pr.get("min") or 0.0)
                     gp_cnts[pr["pid"]] += 1
-                    if pr["starter"]:
+                    if pr.get("starter"):
                         st_cnts[pr["pid"]] += 1
             cands = []
             all_pids = set(min_sums.keys()) | (set(cur_roster.keys()) if is_pending else set())
@@ -204,26 +233,29 @@ def get_pregame_lineup(tname, s_lbl, d_iso, is_pending=False, top_k=8):
                     if cur_roster and pid not in cur_roster:
                         continue
                     st_lbl = str(cur_roster.get(pid, {}).get("status", "Healthy"))
-                    if st_lbl.lower() == "out":
+                    if is_inactive_nhl_status(st_lbl):
                         continue
                 g_c = gp_cnts.get(pid, 0)
                 obs_m = (min_sums[pid] / g_c) if g_c > 0 else 0.0
-                prior_m = base_mpg.get(pid, 12.0)
-                # Empirical Bayes blend so 1st/2nd game of season is stable
-                blend_mpg = (g_c * obs_m + 2.0 * prior_m) / (g_c + 2.0) if g_c > 0 else (prior_m * 0.4)
-                if blend_mpg >= 6.0:
-                    cands.append((pid, round(blend_mpg, 1), st_cnts.get(pid, 0) >= max(1, g_c // 2)))
+                default_prior = 55.0 if p_static[pid].get("pos") == "G" else 14.0
+                prior_m = base_toi.get(pid, default_prior)
+                blend_toi = (g_c * obs_m + 2.0 * prior_m) / (g_c + 2.0) if g_c > 0 else (prior_m * 0.4)
+                if blend_toi >= 6.0:
+                    cands.append((pid, round(blend_toi, 1), st_cnts.get(pid, 0) >= max(1, g_c // 2)))
             cands.sort(key=lambda x: (x[2], x[1]), reverse=True)
-            if len(cands) >= 5:
-                return cands[:top_k]
+            picked = _select_top_lineup_with_goalie_cap(cands, top_k=top_k)
+            if len(picked) >= 5:
+                return picked
 
     # Historical seasons (2009-10..2025-26) or Opening Night fallback
     raw_list = season_team_players.get(f"{s_lbl}||{tname}", [])
     if not raw_list:
-        # fallback to adjacent season
         y0 = int(s_lbl[:4])
         raw_list = season_team_players.get(f"{y0-1}-{str(y0)[-2:]}||{tname}", [])
-    out = []
+    if not raw_list and cur_roster:
+        raw_list = [{"pid": pid, "toi": 16.0} for pid in cur_roster]
+
+    cands = []
     cur_roster = live_roster_pids.get(tname, {})
     for idx_p, r in enumerate(raw_list):
         pid = r["pid"]
@@ -232,15 +264,14 @@ def get_pregame_lineup(tname, s_lbl, d_iso, is_pending=False, top_k=8):
         if is_pending and cur_roster:
             if pid not in cur_roster:
                 continue
-            if str(cur_roster[pid].get("status", "")).lower() == "out":
+            if is_inactive_nhl_status(cur_roster[pid].get("status", "")):
                 continue
-        mpg = max(8.0, float(r.get("mpg") or 15.0))
-        out.append((pid, round(mpg, 1), idx_p < 5))
-        if len(out) >= top_k:
-            break
-    return out
+        toi_v = max(8.0, float(r.get("toi") or r.get("mpg") or 16.0))
+        cands.append((pid, round(toi_v, 1), idx_p < 6))
+    return _select_top_lineup_with_goalie_cap(cands, top_k=top_k)
 
-# Precompute lineups once across all games!
+
+# Precompute Top-8 TOI-weighted active lineups (plus Top-12 for full 12-player polarity tracking)
 game_lineups = []
 for g in all_games:
     is_pend = not g["done"]
@@ -248,12 +279,13 @@ for g in all_games:
     al = get_pregame_lineup(g["a"], g["s"], g["d"], is_pend, top_k=8)
     game_lineups.append((hl, al))
 
-print(f"Precomputed strictly pre-game Top-8 lineups for {len(all_games)} games in {time.time()-t0:.1f}s")
+print(f"Precomputed strictly pre-game Top-8 TOI lineups for {len(all_games)} NHL games in {time.time()-t0:.1f}s")
 
-# Entity memoization cache: (d_iso, is_local_tz, pid, mode_key) -> (ele_p, ele_fin, ele_dyn, m_dict)
+
 def eval_team_lineup(d_ctx, lineup, mode_key, tbl):
     """
-    Minute-weighted aggregation of active players preserving exact Step 4 integer lattice & algebraic laws:
+    TOI-weighted aggregation of active NHL players preserving 100% of Step 4 integer lattice & algebraic laws:
+      DEG1 = 88 (28 GEMINI / Element AIR)
       ele_fin = ele_p + ele_date_sum
       ele_dyn = ele_p + ele_fin
     """
@@ -266,24 +298,23 @@ def eval_team_lineup(d_ctx, lineup, mode_key, tbl):
     m_acc = {k: [0.0, 0.0] for k in m_keys}
     player_cards = []
 
-    for pid, mpg, is_st in lineup:
+    for pid, toi_val, is_st in lineup:
         ps = p_static[pid]
-        w = mpg / tot_w
+        w = toi_val / tot_w
         d2 = ps["deg2"]
         d3 = ps["deg3"][mode_key]
-        ep, ef, ed, md = pc.fast_eval_entity(d_ctx, 53, d2, d3, ps["nam_fawe"], tbl)
+        ep, ef, ed, md = pc.fast_eval_entity(d_ctx, DEG1_BASE, d2, d3, ps["nam_fawe"], tbl)
         for j in range(4):
             ep_acc[j] += w * ep[j]
             nam_acc[j] += w * ps["nam_fawe"][j]
         for k in m_keys:
             m_acc[k][0] += w * md[k][0]
             m_acc[k][1] += w * md[k][1]
-        # Individual player nightly power score (astrological dryness + decan magnitude + dynamic fire/air balance)
         pwr = round(
             (-md["qfin"][1]) * 1.5
             + (abs(md["qdec"][0]) + abs(md["qdec"][1])) * 0.08
             + (ed[0] + ed[1] - ed[2] - ed[3]) * 1.2,
-            1
+            1,
         )
         player_cards.append({
             "pid": pid,
@@ -292,7 +323,8 @@ def eval_team_lineup(d_ctx, lineup, mode_key, tbl):
             "no": ps["j_str"],
             "pos": ps["pos"],
             "st": is_st,
-            "mpg": mpg,
+            "toi": toi_val,
+            "mpg": toi_val,
             "d2": d2,
             "d3": d3,
             "ep": f"{ep[0]}-{ep[1]}-{ep[2]}-{ep[3]}",
@@ -302,7 +334,6 @@ def eval_team_lineup(d_ctx, lineup, mode_key, tbl):
             "pwr": pwr,
         })
 
-    # Exact integer composite ele_p in 0..4 -> exact Step 4 ele_fin and ele_dyn!
     ele_date_sum = d_ctx[7]
     ep_tm = tuple(min(4, max(0, int(round(ep_acc[j])))) for j in range(4))
     ef_tm = tuple(ep_tm[j] + ele_date_sum[j] for j in range(4))
@@ -318,7 +349,8 @@ def eval_team_lineup(d_ctx, lineup, mode_key, tbl):
     m_tm = {k: (int(round(v[0])), int(round(v[1]))) for k, v in m_acc.items()}
     return c12, geo_fin, geo_dyn, m_tm, player_cards
 
-# Helper: 5-Method Fusion breakdown on composite player m_dicts (UTC + Local Tip-Off)
+
+# 5-Method 30-Vote Fusion breakdown on composite player m_dicts (UTC + Local Puck-Drop) — 100% unchanged math
 def score_5_player_fusion(mh_u, ma_u, mh_l, ma_l):
     def sA(hm, am):
         return (1 if hm["qfin"][1]<am["qfin"][1] else (-1 if hm["qfin"][1]>am["qfin"][1] else 0)) + \
@@ -355,17 +387,14 @@ def score_5_player_fusion(mh_u, ma_u, mh_l, ma_l):
                (1 if abs(hm["qfin"][0])+abs(hm["qfin"][1])<abs(am["qfin"][0])+abs(am["qfin"][1]) else (-1 if abs(hm["qfin"][0])+abs(hm["qfin"][1])>abs(am["qfin"][0])+abs(am["qfin"][1]) else 0)) + \
                (1 if hm["qtot"][1]<am["qtot"][1] else (-1 if hm["qtot"][1]>am["qtot"][1] else 0)) + \
                (1 if abs(hm["qnam"][0])+abs(hm["qnam"][1])>abs(am["qnam"][0])+abs(am["qnam"][1]) else (-1 if abs(hm["qnam"][0])+abs(hm["qnam"][1])<abs(am["qnam"][0])+abs(am["qnam"][1]) else 0))
-    va, vb, vc, vd, ve = sA(mh_u,ma_u), sB(mh_u,ma_u), sC(mh_l,ma_l), sD(mh_u,ma_u), sE(mh_l,ma_l)
+    va, vb, vc, vd, ve = sA(mh_u, ma_u), sB(mh_u, ma_u), sC(mh_l, ma_l), sD(mh_u, ma_u), sE(mh_l, ma_l)
     mv = [va, vb, vc, vd, ve]
     f30 = sum(mv)
     ag5 = sum(1 for v in mv if (v > 0 if f30 >= 0 else v < 0))
     return mv, f30, ag5
 
-# Import nba_live_sync helpers for Weekly/Daily Pythagorean + Log5 snapshots & 4-Channel Twin Engine!
-sys.path.insert(0, "/home/user/workspace/player_app_src/artifacts/api-server/python")
-import nba_live_sync as nls
 
-# Precompute Weekly & Daily Standings Snapshots across 2010..2027 (purely outcome-based, shared across modes)
+# Precompute Weekly & Daily Standings Snapshots across 2010..2027 (zero lookahead)
 done_base_hist = [
     {"d": g["d"], "day": g["day"], "s": g["s"], "h": g["h"], "a": g["a"], "hp": g["hp"], "ap": g["ap"], "mg": g["hp"] - g["ap"]}
     for g in all_games if g["done"]
@@ -382,9 +411,9 @@ for g in all_games:
         cut_pairs.add((mon, g["s"]))
 
 all_snaps = nls.build_all_snapshots(done_base_hist, cut_pairs)
-print(f"Built {len(all_snaps)} zero-lookahead standings snapshots in {time.time()-t0:.1f}s")
+print(f"Built {len(all_snaps)} zero-lookahead NHL standings snapshots in {time.time()-t0:.1f}s")
 
-# Fast numpy twin search matching nba_live_sync.auto_filter 100%
+
 def fast_auto_filter_np(D, lim, t_vec, t_geo, g_key, geo_first, min_gf):
     idx = np.arange(lim, dtype=np.int32)
     m_mat = D["m12"]
@@ -427,8 +456,9 @@ def fast_auto_filter_np(D, lim, t_vec, t_geo, g_key, geo_first, min_gf):
     pct = round(max(hw, aw) * 100.0 / tot, 1)
     return {
         "pool": pool_rows, "hw": hw, "aw": aw, "pct": pct, "mv": abs(hw - aw),
-        "nat": nat, "ds": eff, "d_raw": d_raw, "s_delta": s_delta
+        "nat": nat, "ds": eff, "d_raw": d_raw, "s_delta": s_delta,
     }
+
 
 summary_comparison = {}
 
@@ -439,6 +469,7 @@ for mode_key, mode_label in [
 ]:
     tm_m = time.time()
     vocab = {}
+
     def vid(s):
         if not s:
             return 0
@@ -460,7 +491,7 @@ for mode_key, mode_label in [
         snap_dy = all_snaps[(g["d"], g["s"])]
         h_tab, a_tab = nls.geo_tab_pair(snap_dy, g["h"], g["a"])
 
-        mv, f30, ag5 = [0,0,0,0,0], 0, 3
+        mv, f30, ag5 = [0, 0, 0, 0, 0], 0, 3
         if need_target:
             y, m, d = map(int, g["d"].split("-"))
             jd_l = pc.get_jd_local(y, m, d, g["tz"], 19, 30)
@@ -482,7 +513,6 @@ for mode_key, mode_label in [
             "a_pcards": a_pcards if g["d"] >= "2026-10-01" else None,
         })
 
-    # Build weekday numpy indices for completed games
     by_day = defaultdict(list)
     hist_pack_out = []
     for mr in mode_rows:
@@ -499,7 +529,7 @@ for mode_key, mode_label in [
             hist_pack_out.append([
                 g["d"], g["day"], g["s"], g["h"], g["a"], g["hp"], g["ap"], mg,
                 mr["h12"], mr["h_dyn"], mr["a12"], mr["a_dyn"],
-                mr["f30"], "", mr["h_tab"], mr["a_tab"]
+                mr["f30"], "", mr["h_tab"], mr["a_tab"],
             ])
 
     day_np = {}
@@ -513,7 +543,6 @@ for mode_key, mode_label in [
             "tab": np.array([x["v_htab"] for x in lst], dtype=np.int32),
         }
 
-    # Evaluate 2024-10-01..2027-04-11 games (exact NBA-SIGNAL-DASHBORD schema!)
     preds_out = []
     game_num = 0
     for mr in mode_rows:
@@ -524,8 +553,9 @@ for mode_key, mode_label in [
         D = day_np[g["day"]]
         lim = bisect.bisect_left(D["dates"], g["d"])
 
-        sd  = fast_auto_filter_np(D, lim, mr["v_h12"], mr["v_hdyn"], "dyn", False, 3)
-        gd3 = fast_auto_filter_np(D, lim, mr["v_h12"], mr["v_hdyn"], "dyn", True,  3)
+        sd = fast_auto_filter_np(D, lim, mr["v_h12"], mr["v_hdyn"], "dyn", False, 3)
+        gd3 = fast_auto_filter_np(D, lim, mr["v_h12"], mr["v_hdyn"], "dyn", True, 3)
+        mv = mr["mv"]
         f30 = mr["f30"]
         ag5 = mr["ag5"]
         sa = (sd["hw"] >= sd["aw"]) == (f30 >= 0)
@@ -542,7 +572,7 @@ for mode_key, mode_label in [
         hfav = True if hw > aw else (False if aw > hw else f30 >= 0)
         sgn = 1 if hfav else -1
         pred = g["h"] if hfav else g["a"]
-        opp  = g["a"] if hfav else g["h"]
+        opp = g["a"] if hfav else g["h"]
         f30_o = f30 * sgn
         agree = (hfav and f30 > 0) or (not hfav and f30 < 0)
         both100 = sd["pct"] == 100.0 and gd3["pct"] == 100.0 and ((sd["hw"] > 0) == (gd3["hw"] > 0))
@@ -550,18 +580,22 @@ for mode_key, mode_label in [
         bcombo = v71 and (agree or both100)
 
         c1 = fast_auto_filter_np(D, lim, mr["v_h12"], mr["v_hfin"], "fin", False, 5)
-        c2 = fast_auto_filter_np(D, lim, mr["v_h12"], mr["v_hfin"], "fin", True,  5)
-        c3 = fast_auto_filter_np(D, lim, mr["v_h12"], mr["v_hdyn"], "dyn", True,  5)
-        c4 = fast_auto_filter_np(D, lim, mr["v_h12"], mr["v_htab"], "tab", True,  5)
+        c2 = fast_auto_filter_np(D, lim, mr["v_h12"], mr["v_hfin"], "fin", True, 5)
+        c3 = fast_auto_filter_np(D, lim, mr["v_h12"], mr["v_hdyn"], "dyn", True, 5)
+        c4 = fast_auto_filter_np(D, lim, mr["v_h12"], mr["v_htab"], "tab", True, 5)
 
         ds4 = [c1["ds"], c2["ds"], c3["ds"], c4["ds"]]
         ds4_o = [v * sgn for v in ds4]
         ds3_o = ds4_o[:3]
-        vh4 = sum(1 for v in ds4 if v > 0); va4 = sum(1 for v in ds4 if v < 0)
+        vh4 = sum(1 for v in ds4 if v > 0)
+        va4 = sum(1 for v in ds4 if v < 0)
         nat4 = sum(1 for cx in (c1, c2, c3, c4) if cx["nat"])
-        fav_v4 = vh4 if hfav else va4; opp_v4 = va4 if hfav else vh4
-        fav_v3 = sum(1 for v in ds3_o if v > 0); opp_v3 = sum(1 for v in ds3_o if v < 0)
-        min_o4 = min(ds4_o); min_o3 = min(ds3_o)
+        fav_v4 = vh4 if hfav else va4
+        opp_v4 = va4 if hfav else vh4
+        fav_v3 = sum(1 for v in ds3_o if v > 0)
+        opp_v3 = sum(1 for v in ds3_o if v < 0)
+        min_o4 = min(ds4_o)
+        min_o3 = min(ds3_o)
 
         y, m, d = map(int, g["d"].split("-"))
         dt = datetime.date(y, m, d)
@@ -618,22 +652,30 @@ for mode_key, mode_label in [
         st_lbl = ("WIN" if pred == aw_team else "LOSS") if g["done"] else "PENDING"
         sc_lbl = f"{g['hp']}-{g['ap']}" if g["done"] else "PENDING"
 
-        # Margins for TP1/TP2/TP3
         dir_mgs = sorted([abs(x["mg"]) for x in ch["pool"] if (x["mg"] > 0) == hfav])
         if dir_mgs:
             tp_arr = [
-                int(dir_mgs[max(0, len(dir_mgs)//4)]),
-                int(dir_mgs[len(dir_mgs)//2]),
-                int(dir_mgs[min(len(dir_mgs)-1, (3*len(dir_mgs))//4)])
+                int(dir_mgs[max(0, len(dir_mgs) // 4)]),
+                int(dir_mgs[len(dir_mgs) // 2]),
+                int(dir_mgs[min(len(dir_mgs) - 1, (3 * len(dir_mgs)) // 4)]),
             ]
         else:
-            tp_arr = [4, 8, 12]
+            tp_arr = [1, 2, 3]
 
-        # Injured OUT players on live roster for pending / 2026-27 games
         h_out, a_out = [], []
         if g["d"] >= "2026-11-10":
-            h_out = [f"{p['full_name']} (#{p['jersey']})" for p in live_rosters.get(g["h"], []) if str(p.get("status","")).lower() == "out"]
-            a_out = [f"{p['full_name']} (#{p['jersey']})" for p in live_rosters.get(g["a"], []) if str(p.get("status","")).lower() == "out"]
+            h_act_pids = {p["pid"] for p in (mr["h_pcards"] or [])}
+            a_act_pids = {p["pid"] for p in (mr["a_pcards"] or [])}
+            h_out = [
+                f"{p['full_name']} (#{p['jersey']} • {p['status']})"
+                for p in live_rosters.get(g["h"], [])
+                if is_inactive_nhl_status(p.get("status", "")) and p["pid"] not in h_act_pids
+            ]
+            a_out = [
+                f"{p['full_name']} (#{p['jersey']} • {p['status']})"
+                for p in live_rosters.get(g["a"], [])
+                if is_inactive_nhl_status(p.get("status", "")) and p["pid"] not in a_act_pids
+            ]
 
         pred_obj = {
             "n": game_num,
@@ -641,6 +683,8 @@ for mode_key, mode_label in [
             "h": g["h"], "a": g["a"],
             "hc": team_code_map.get(g["h"], ""), "ac": team_code_map.get(g["a"], ""),
             "venue": g["arena"],
+            "lat": g.get("lat", ""), "lon": g.get("lon", ""), "tz": g.get("tz", ""),
+            "deg1": DEG1_BASE, "deg1_sign": DEG1_SIGN, "deg1_el": DEG1_ELEMENT,
             "hp": g["hp"], "ap": g["ap"],
             "sc": sc_lbl, "pw": pred, "fpw": pred, "sys_win": pred, "twWin": pred,
             "aw": aw_team, "st": st_lbl, "fst": st_lbl,
@@ -683,8 +727,8 @@ for mode_key, mode_label in [
         }
         preds_out.append(pred_obj)
 
-    # Calculate zero-lookahead evaluation stats across 2024-27, 2024-25, 2025-26, 2026-27, last 50
     done_p = [x for x in preds_out if x["done"]]
+
     def calc_metric(sub, flag_k):
         sel = [x for x in sub if x.get(flag_k)]
         w = sum(1 for x in sel if x["sys_win"] == x["aw"])
@@ -697,7 +741,13 @@ for mode_key, mode_label in [
 
     stats_obj = {
         "mode": mode_key,
+        "deg1": DEG1_BASE,
+        "deg1Sign": DEG1_SIGN,
+        "deg1Element": DEG1_ELEMENT,
         "label": mode_label,
+        "universeGames": len(all_games),
+        "completedArchiveGames": len(hist_pack_out),
+        "targetGames": len(preds_out),
         "total_2427": calc_metric(done_p, "f1_wtp"),
         "vip_2427": calc_metric(done_p, "vip_idx3"),
         "union_2427": calc_metric(done_p, "f1_union"),
@@ -708,7 +758,7 @@ for mode_key, mode_label in [
         "last50": {"w": l50_w, "n": len(last50), "pct": round(100.0 * l50_w / max(1, len(last50)), 1)},
     }
     summary_comparison[mode_key] = stats_obj
-    print(f"\n=== {mode_label} ({time.time()-tm_m:.1f}s) ===")
+    print(f"\n=== {mode_label} | DEG1={DEG1_BASE} ({DEG1_SIGN}) ({time.time()-tm_m:.1f}s) ===")
     print("  2024-27 Final (f1_wtp):", stats_obj["total_2427"])
     print("  2024-27 VIP           :", stats_obj["vip_2427"])
     print("  2024-25 Season        :", stats_obj["s2425"])
@@ -716,18 +766,27 @@ for mode_key, mode_label in [
     print("  2026-27 Live Season   :", stats_obj["s2627"])
     print("  Recent 50 Signals     :", stats_obj["last50"])
 
-
     SHAMSI_MONTHS = ["", "فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور", "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند"]
+
     def _g2j(gy, gm, gd):
         g_d_m = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334]
         gy2 = gy + 1 if gm > 2 else gy
         days = 355666 + (365 * gy) + ((gy2 + 3) // 4) - ((gy2 + 99) // 100) + ((gy2 + 399) // 400) + gd + g_d_m[gm - 1]
-        jy = -1595 + (33 * (days // 12053)); days %= 12053
-        jy += 4 * (days // 1461); days %= 1461
-        if days > 365: jy += (days - 1) // 365; days = (days - 1) % 365
-        if days < 186: jm = 1 + (days // 31); jd = 1 + (days % 31)
-        else: jm = 7 + ((days - 186) // 30); jd = 1 + ((days - 186) % 30)
+        jy = -1595 + (33 * (days // 12053))
+        days %= 12053
+        jy += 4 * (days // 1461)
+        days %= 1461
+        if days > 365:
+            jy += (days - 1) // 365
+            days = (days - 1) % 365
+        if days < 186:
+            jm = 1 + (days // 31)
+            jd = 1 + (days % 31)
+        else:
+            jm = 7 + ((days - 186) // 30)
+            jd = 1 + ((days - 186) % 30)
         return jy, jm, jd
+
     for _g in preds_out:
         _y, _m, _d = map(int, _g["d"].split("-"))
         _jy, _jm, _jd = _g2j(_y, _m, _d)
@@ -735,23 +794,36 @@ for mode_key, mode_label in [
         _g["sh_m"] = f"{_jy}-{_jm:02d} ({SHAMSI_MONTHS[_jm]})"
         _hp = _g.get("h_players") or []
         _ap = _g.get("a_players") or []
-        _hd2 = _hp[0]["d2"] if _hp else 53
+        _hd2 = _hp[0]["d2"] if _hp else DEG1_BASE
         _hd3 = _hp[0]["d3"] if _hp else 0
-        _ad2 = _ap[0]["d2"] if _ap else 53
+        _ad2 = _ap[0]["d2"] if _ap else DEG1_BASE
         _ad3 = _ap[0]["d3"] if _ap else 0
-        _g["deg"] = [53, _hd2, _hd3, _ad2, _ad3, _hd2, _ad2, _hd3]
+        _g["deg"] = [DEG1_BASE, _hd2, _hd3, _ad2, _ad3, _hd2, _ad2, _hd3]
 
-    # Save predictions & history pack for this mode
     json.dump(
-        {"games": preds_out, "modeStats": stats_obj},
-        open(os.path.join(PUB_DIR, f"player_nba_preds_{mode_key}.json"), "w"),
-        ensure_ascii=False, separators=(",", ":")
+        {
+            "league": "NHL",
+            "deg1": DEG1_BASE,
+            "deg1Sign": DEG1_SIGN,
+            "deg1Element": DEG1_ELEMENT,
+            "games": preds_out,
+            "modeStats": stats_obj,
+        },
+        open(os.path.join(PUB_DIR, f"player_nhl_preds_{mode_key}.json"), "w", encoding="utf-8"),
+        ensure_ascii=False,
+        separators=(",", ":"),
     )
     json.dump(
         hist_pack_out,
-        open(os.path.join(PUB_DIR, f"player_nba_hist_{mode_key}.json"), "w"),
-        ensure_ascii=False, separators=(",", ":")
+        open(os.path.join(PUB_DIR, f"player_nhl_hist_{mode_key}.json"), "w", encoding="utf-8"),
+        ensure_ascii=False,
+        separators=(",", ":"),
     )
 
-json.dump(summary_comparison, open(os.path.join(PUB_DIR, "player_modes_comparison.json"), "w"), ensure_ascii=False, indent=2)
-print(f"\nALL 3 MODES BUILT & SAVED in {time.time()-t0:.1f}s!")
+json.dump(summary_comparison, open(os.path.join(PUB_DIR, "player_modes_comparison.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+
+# Save initial local JSON backups for NHL-PLAYERS-GEOMANTIC-INPUT and NHL-PLAYERS-CALCULATION
+mode_c_bundle = json.load(open(os.path.join(PUB_DIR, "player_nhl_preds_mode_c.json"), "r", encoding="utf-8"))
+nls.save_local_and_optional_sheets(mode_c_bundle, PUB_DIR, datetime.date.today().isoformat())
+
+print(f"\nALL 3 NHL MODES (DEG1={DEG1_BASE} • {DEG1_SIGN} • {DEG1_ELEMENT}) BUILT & SAVED in {time.time()-t0:.1f}s!")

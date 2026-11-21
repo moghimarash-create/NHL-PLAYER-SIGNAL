@@ -1,21 +1,35 @@
 #!/usr/bin/env python3
 """
-Live ESPN Score + Injury + Google Sheets Sync for NHL-PLAYER-SIGNAL (DEG1 = 88)
+Live ESPN NHL Score + Injury + Local JSON / Env Google Sheets Sync for NHL-PLAYER-SIGNAL
+Base Constant: DEG1 = 88 (28 GEMINI / Element AIR)
 Updates all 3 DEG3 player modes (mode_c, mode_b, mode_a) in:
   - artifacts/calc-dashboard/public/player_nhl_preds_{mode}.json
   - artifacts/calc-dashboard/public/player_nhl_hist_{mode}.json
-And syncs completed game scores & predictions to the dedicated Google Sheets:
-  - NHL-PLAYERS-GEOMANTIC-INPUT (1DIuN12_G3FRfCThsmhPvtq8nLnU2gJBd0H_635t39FE)
-  - NHL-PLAYERS-CALCULATION     (16lAFg4a896jWHx4WeDxoLk_RQslyJAHZw51YmjjRABs)
+And saves local JSON sheet backups:
+  - artifacts/api-server/data/nhl_sheet_input_backup.json
+  - artifacts/api-server/data/nhl_sheet_calc_backup.json
+Optionally syncs to dedicated NHL Google Sheets ONLY when env vars
+NHL_PLAYER_INPUT_SHEET_ID / NHL_PLAYER_CALC_SHEET_ID are explicitly configured
+(live NBA sheets are strictly blocked and never touched).
 """
-import argparse, json, math, os, sys, unicodedata, urllib.request
-from datetime import datetime, timezone, date, timedelta
+import argparse
+import json
+import math
+import os
+import sys
+import urllib.request
+from datetime import date, datetime, timedelta, timezone
+
+DEG1_BASE = 88  # 28 GEMINI / Element AIR
+DEG1_SIGN = "28 GEMINI"
+DEG1_ELEMENT = "AIR"
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = os.path.abspath(os.path.join(HERE, "..", "data"))
 DEFAULT_PUB_DIR = os.path.abspath(os.path.join(HERE, "..", "..", "calc-dashboard", "public"))
 
-INPUT_SHEET_ID = "1DIuN12_G3FRfCThsmhPvtq8nLnU2gJBd0H_635t39FE"
-CALC_SHEET_ID  = "16lAFg4a896jWHx4WeDxoLk_RQslyJAHZw51YmjjRABs"
+INPUT_SHEET_ID = os.environ.get("NHL_PLAYER_INPUT_SHEET_ID", "").strip()
+CALC_SHEET_ID = os.environ.get("NHL_PLAYER_CALC_SHEET_ID", "").strip()
 
 NHL_TEAMS_32 = [
     "Anaheim Ducks", "Boston Bruins", "Buffalo Sabres", "Calgary Flames",
@@ -25,54 +39,72 @@ NHL_TEAMS_32 = [
     "New Jersey Devils", "New York Islanders", "New York Rangers", "Ottawa Senators",
     "Philadelphia Flyers", "Pittsburgh Penguins", "San Jose Sharks", "Seattle Kraken",
     "St. Louis Blues", "Tampa Bay Lightning", "Toronto Maple Leafs", "Utah Mammoth",
-    "Vancouver Canucks", "Vegas Golden Knights", "Washington Capitals", "Winnipeg Jets"
+    "Vancouver Canucks", "Vegas Golden Knights", "Washington Capitals", "Winnipeg Jets",
 ]
 
-FRANCHISE_CONTINUITY = {
-    "Atlanta Thrashers": "Winnipeg Jets",
-    "Phoenix Coyotes": "Utah Mammoth",
-    "Arizona Coyotes": "Utah Mammoth",
+HIST_TEAM_NORM = {
     "Utah Hockey Club": "Utah Mammoth",
+    "Arizona Coyotes": "Utah Mammoth",
+    "Phoenix Coyotes": "Utah Mammoth",
+    "Atlanta Thrashers": "Winnipeg Jets",
     "Montréal Canadiens": "Montreal Canadiens",
     "St Louis Blues": "St. Louis Blues",
 }
 
-def clean_ascii(s):
-    s = unicodedata.normalize("NFKD", str(s or ""))
-    return "".join(ch for ch in s if not unicodedata.combining(ch)).strip()
+ESPN_ABBR_TO_CANON = {
+    "ANA": "Anaheim Ducks", "BOS": "Boston Bruins", "BUF": "Buffalo Sabres",
+    "CGY": "Calgary Flames", "CAL": "Calgary Flames", "CAR": "Carolina Hurricanes",
+    "CHI": "Chicago Blackhawks", "COL": "Colorado Avalanche", "CBJ": "Columbus Blue Jackets",
+    "CLS": "Columbus Blue Jackets", "DAL": "Dallas Stars", "DET": "Detroit Red Wings",
+    "EDM": "Edmonton Oilers", "FLA": "Florida Panthers", "LA": "Los Angeles Kings",
+    "LAK": "Los Angeles Kings", "MIN": "Minnesota Wild", "MTL": "Montreal Canadiens",
+    "MON": "Montreal Canadiens", "NSH": "Nashville Predators", "NAS": "Nashville Predators",
+    "NJ": "New Jersey Devils", "NJD": "New Jersey Devils", "NYI": "New York Islanders",
+    "NYR": "New York Rangers", "OTT": "Ottawa Senators", "PHI": "Philadelphia Flyers",
+    "PIT": "Pittsburgh Penguins", "SJ": "San Jose Sharks", "SJS": "San Jose Sharks",
+    "SEA": "Seattle Kraken", "STL": "St. Louis Blues", "TB": "Tampa Bay Lightning",
+    "TBL": "Tampa Bay Lightning", "TOR": "Toronto Maple Leafs", "UTAH": "Utah Mammoth",
+    "UTA": "Utah Mammoth", "ARI": "Utah Mammoth", "PHX": "Utah Mammoth",
+    "VAN": "Vancouver Canucks", "VGK": "Vegas Golden Knights", "VEG": "Vegas Golden Knights",
+    "WSH": "Washington Capitals", "WAS": "Washington Capitals", "WPG": "Winnipeg Jets",
+    "ATL": "Winnipeg Jets",
+}
+
 
 def norm_team(s):
-    t = clean_ascii(s)
-    if t == "Utah Hockey Club":
-        return "Utah Mammoth"
-    if t == "St Louis Blues":
-        return "St. Louis Blues"
-    return t
+    t = str(s or "").strip()
+    return HIST_TEAM_NORM.get(t, t)
 
-def franchise_canon(s):
-    t = clean_ascii(s)
-    return FRANCHISE_CONTINUITY.get(t, t)
 
-def active_teams_for_season(s_lbl):
-    y0 = int(str(s_lbl or "2024-25")[:4])
-    out = [t for t in NHL_TEAMS_32 if not (t == "Vegas Golden Knights" and y0 < 2017) and not (t == "Seattle Kraken" and y0 < 2021)]
-    return out
+def is_inactive_nhl_status(status_str):
+    s = str(status_str or "").strip().upper()
+    if s in ("OUT", "IR", "IR-LT", "IR-NR", "LTIR", "INJURED RESERVE", "SUSPENSION", "SUSPENDED", "SUSP"):
+        return True
+    if s.startswith("IR-") or "INJURED RESERVE" in s or "SUSPENS" in s:
+        return True
+    return False
+
 
 def season_of_date(d_iso):
-    if "2019-10-01" <= d_iso <= "2020-10-15": return "2019-20"
-    if "2020-12-15" <= d_iso <= "2021-08-15": return "2020-21"
-    if "2013-01-01" <= d_iso <= "2013-07-01": return "2012-13"
+    if "2019-10-01" <= d_iso <= "2020-10-05":
+        return "2019-20"
+    if "2020-12-15" <= d_iso <= "2021-07-20":
+        return "2020-21"
+    if "2013-01-01" <= d_iso <= "2013-07-01":
+        return "2012-13"
     y, m, _ = map(int, d_iso.split("-"))
     return f"{y}-{(y+1)%100:02d}" if m >= 9 else f"{y-1}-{y%100:02d}"
 
-def pyth_nhl(gf, ga, exp=2.05):
-    if gf <= 0 or ga <= 0:
+
+def pyth_morey(pf, pa, exp=13.91):
+    if pf <= 0 or pa <= 0:
         return 0.5
-    r = ga / gf
+    r = pa / pf
     try:
         return 1.0 / (1.0 + (r ** exp))
     except OverflowError:
         return 0.0 if r > 1 else 1.0
+
 
 def log5_prob(p_h, p_a, ha=0.50):
     p_h = min(0.92, max(0.08, p_h))
@@ -81,26 +113,34 @@ def log5_prob(p_h, p_a, ha=0.50):
     den = num + (1.0 - p_h) * p_a * (1.0 - ha)
     return num / den if den > 0 else 0.5
 
+
 def team_elem(p_tm):
-    if p_tm >= 0.56: return "FIRE"
-    if p_tm >= 0.50: return "AIR"
-    if p_tm >= 0.44: return "WATER"
+    if p_tm >= 0.58:
+        return "FIRE"
+    if p_tm >= 0.50:
+        return "AIR"
+    if p_tm >= 0.42:
+        return "WATER"
     return "EARTH"
+
 
 def matchup_elem(p_pick_pct):
-    if p_pick_pct >= 56.0: return "FIRE"
-    if p_pick_pct >= 50.5: return "AIR"
-    if p_pick_pct >= 44.0: return "WATER"
+    if p_pick_pct >= 58.0:
+        return "FIRE"
+    if p_pick_pct >= 51.0:
+        return "AIR"
+    if p_pick_pct >= 44.0:
+        return "WATER"
     return "EARTH"
 
+
 def geo_tab_pair(snap, h_tm, a_tm):
-    hc = franchise_canon(h_tm)
-    ac = franchise_canon(a_tm)
-    hrk = snap["rk"].get(hc, 16)
-    ark = snap["rk"].get(ac, 16)
-    h_tab = f"{int(hrk<=11)}{int(hrk<=22)}{int(ark<=11)}{int(ark<=22)}"
-    a_tab = f"{int(ark<=11)}{int(ark<=22)}{int(hrk<=11)}{int(hrk<=22)}"
+    hrk = snap["rk"].get(h_tm, 16)
+    ark = snap["rk"].get(a_tm, 16)
+    h_tab = f"{int(hrk<=10)}{int(hrk<=20)}{int(ark<=10)}{int(ark<=20)}"
+    a_tab = f"{int(ark<=10)}{int(ark<=20)}{int(hrk<=10)}{int(hrk<=20)}"
     return h_tab, a_tab
+
 
 def elem_fin(el12):
     if not el12 or len(el12) < 8:
@@ -114,13 +154,16 @@ def elem_fin(el12):
         out.append("1" if abs(n) % 2 == 1 else "0")
     return "".join(out)
 
+
 def fetch_espn_date(d_iso):
     ds = d_iso.replace("-", "")
     url = f"https://site.api.espn.com/apis/site/v2/sports/hockey/nhl/scoreboard?dates={ds}"
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    data = json.loads(urllib.request.urlopen(req, timeout=12).read().decode("utf-8"))
+    data = json.loads(urllib.request.urlopen(req, timeout=15).read().decode("utf-8"))
     finals = {}
     for ev in data.get("events", []):
+        if int(((ev.get("season") or {}).get("type")) or 2) == 1:
+            continue
         if not ev.get("status", {}).get("type", {}).get("completed"):
             continue
         comps = ev.get("competitions", [{}])[0].get("competitors", [])
@@ -128,16 +171,19 @@ def fetch_espn_date(d_iso):
         ac = next((c for c in comps if c.get("homeAway") == "away"), None)
         if not hc or not ac:
             continue
-        h = norm_team(hc.get("team", {}).get("displayName", ""))
-        a = norm_team(ac.get("team", {}).get("displayName", ""))
+        hab = str((hc.get("team") or {}).get("abbreviation", "")).upper()
+        aab = str((ac.get("team") or {}).get("abbreviation", "")).upper()
+        h = ESPN_ABBR_TO_CANON.get(hab, norm_team((hc.get("team") or {}).get("displayName", "")))
+        a = ESPN_ABBR_TO_CANON.get(aab, norm_team((ac.get("team") or {}).get("displayName", "")))
         try:
-            hp = int(hc.get("score", 0))
-            ap = int(ac.get("score", 0))
+            hp = int(float(hc.get("score", 0)))
+            ap = int(float(ac.get("score", 0)))
         except Exception:
             continue
         if (hp > 0 or ap > 0) and hp != ap:
             finals[(h, a)] = (hp, ap)
     return finals
+
 
 def build_all_snapshots(hist, cut_pairs):
     out = {}
@@ -148,58 +194,53 @@ def build_all_snapshots(hist, cut_pairs):
         while ptr < n and hist[ptr]["d"] < cut_iso:
             r = hist[ptr]
             if r["mg"] != 0:
-                hf = franchise_canon(r["h"])
-                af = franchise_canon(r["a"])
-                th.setdefault(hf, []).append((r["s"], r["mg"] > 0, r["mg"], r["hp"], r["ap"]))
-                th.setdefault(af, []).append((r["s"], r["mg"] < 0, -r["mg"], r["ap"], r["hp"]))
+                th.setdefault(r["h"], []).append((r["s"], r["mg"] > 0, r["mg"], r["hp"], r["ap"]))
+                th.setdefault(r["a"], []).append((r["s"], r["mg"] < 0, -r["mg"], r["ap"], r["hp"]))
             ptr += 1
-        active_set = active_teams_for_season(s_cur)
         tp, wl, pstr = {}, {}, {}
-        for tm in active_set:
-            arr = th.get(tm, [])
+        for tm, arr in th.items():
             sp = [x for x in arr if x[0] == s_cur]
             l20 = arr[-20:]
             gp = len(sp)
             w = sum(1 for x in sp if x[1])
-            gds = sum(x[2] for x in sp)
-            gf = sum(x[3] for x in sp)
-            ga = sum(x[4] for x in sp)
+            pds = sum(x[2] for x in sp)
+            pf = sum(x[3] for x in sp)
+            pa = sum(x[4] for x in sp)
             l20_wp = sum(1 for x in l20 if x[1]) / len(l20) if l20 else 0.5
-            l20_gd = sum(x[2] for x in l20) / len(l20) if l20 else 0.0
+            l20_pd = sum(x[2] for x in l20) / len(l20) if l20 else 0.0
             b_wp = (w + 10.0 * l20_wp) / (gp + 10.0)
-            b_gd = (gds + 10.0 * l20_gd) / (gp + 10.0)
-            tp[tm] = round(50.0 + 60.0 * (b_wp - 0.5) + 8.0 * b_gd, 1)
+            b_pd = (pds + 10.0 * l20_pd) / (gp + 10.0)
+            tp[tm] = round(50.0 + 60.0 * (b_wp - 0.5) + 1.5 * b_pd, 1)
             wl[tm] = f"{w}-{gp - w}"
-            prior_p = (0.5 * (0.4 * l20_wp + 0.6 * pyth_nhl(sum(x[3] for x in l20), sum(x[4] for x in l20))) + 0.25) if l20 else 0.5
+            prior_p = (0.5 * (0.4 * l20_wp + 0.6 * pyth_morey(sum(x[3] for x in l20), sum(x[4] for x in l20))) + 0.25) if l20 else 0.5
             p_wl = (w + 10.0 * prior_p) / (gp + 10.0)
-            p_py = (gp * (pyth_nhl(gf, ga) if gp > 0 else prior_p) + 10.0 * prior_p) / (gp + 10.0)
+            p_py = (gp * (pyth_morey(pf, pa) if gp > 0 else prior_p) + 10.0 * prior_p) / (gp + 10.0)
             pstr[tm] = 0.35 * p_wl + 0.65 * p_py
         ranked = sorted(pstr.keys(), key=lambda t: pstr[t], reverse=True)
         rk = {t: i + 1 for i, t in enumerate(ranked)}
         out[(cut_iso, s_cur)] = {"tp": tp, "rk": rk, "wl": wl, "p": pstr}
     return out
 
+
 def make_wtp_obj(snap, label_date, h_tm, a_tm, hfav):
-    hc = franchise_canon(h_tm)
-    ac = franchise_canon(a_tm)
-    htp = snap["tp"].get(hc, 50.0)
-    atp = snap["tp"].get(ac, 50.0)
+    htp = snap["tp"].get(h_tm, 50.0)
+    atp = snap["tp"].get(a_tm, 50.0)
     dtp = round((htp - atp) if hfav else (atp - htp), 1)
-    ph = snap["p"].get(hc, 0.5)
-    pa = snap["p"].get(ac, 0.5)
+    ph = snap["p"].get(h_tm, 0.5)
+    pa = snap["p"].get(a_tm, 0.5)
     l5h = round(log5_prob(ph, pa, 0.50) * 100.0, 1)
     l5pick = l5h if hfav else round(100.0 - l5h, 1)
     mel = matchup_elem(l5pick)
-    pfair_h = log5_prob(ph, pa, 0.535)
+    pfair_h = log5_prob(ph, pa, 0.545)
     hodds = round(1.0 / max(0.05, pfair_h), 2)
     aodds = round(1.0 / max(0.05, 1.0 - pfair_h), 2)
     return {
         "mon": label_date,
         "htp": htp, "atp": atp, "dtp": dtp,
-        "hrk": snap["rk"].get(hc, 16),
-        "ark": snap["rk"].get(ac, 16),
-        "hwl": snap["wl"].get(hc, "0-0"),
-        "awl": snap["wl"].get(ac, "0-0"),
+        "hrk": snap["rk"].get(h_tm, 16),
+        "ark": snap["rk"].get(a_tm, 16),
+        "hwl": snap["wl"].get(h_tm, "0-0"),
+        "awl": snap["wl"].get(a_tm, "0-0"),
         "hpct": round(ph * 100.0, 1),
         "apct": round(pa * 100.0, 1),
         "hel": team_elem(ph),
@@ -210,10 +251,10 @@ def make_wtp_obj(snap, label_date, h_tm, a_tm, hfav):
         "mel": mel,
     }
 
+
 def pool_idx_ds(pool):
-    """NHL 1-goal unit numerical index (1x single-win rule, capped at 5 goals to suppress blowouts)."""
-    ch = [min(5, max(1, int(abs(x["mg"])))) for x in pool if x["mg"] > 0]
-    ca = [min(5, max(1, int(abs(x["mg"])))) for x in pool if x["mg"] < 0]
+    ch = [min(5, max(1, math.ceil(abs(x["mg"]) / 4))) for x in pool if x["mg"] > 0]
+    ca = [min(5, max(1, math.ceil(abs(x["mg"]) / 4))) for x in pool if x["mg"] < 0]
     hw, aw = len(ch), len(ca)
     ih = 0 if not ch else (ch[0] if hw == 1 else max(ch) + min(ch))
     ia = 0 if not ca else (ca[0] if aw == 1 else max(ca) + min(ca))
@@ -228,6 +269,7 @@ def pool_idx_ds(pool):
     else:
         eff = 0
     return hw, aw, d, s_delta, eff
+
 
 def auto_filter(t12, tgeo, dpool, geo_first, geo_kind, min_gf):
     pool = list(dpool)
@@ -269,8 +311,9 @@ def auto_filter(t12, tgeo, dpool, geo_first, geo_kind, min_gf):
     pct = round(max(hw, aw) * 100.0 / tot, 1)
     return {
         "pool": pool, "hw": hw, "aw": aw, "pct": pct, "mv": abs(hw - aw),
-        "nat": nat, "ds": eff, "d_raw": d_raw, "s_delta": s_delta
+        "nat": nat, "ds": eff, "d_raw": d_raw, "s_delta": s_delta,
     }
+
 
 def sync_single_mode(pub_dir, mk, finals_by_date):
     p_path = os.path.join(pub_dir, f"player_nhl_preds_{mk}.json")
@@ -317,7 +360,7 @@ def sync_single_mode(pub_dir, mk, finals_by_date):
                     hp, ap_pts, hp - ap_pts,
                     g.get("h_12", []), g.get("h_geo_dyn") or g.get("h_geo", ""),
                     g.get("a_12", []), g.get("a_geo_dyn") or g.get("a_geo", ""),
-                    g.get("f30", 0), "", "", ""
+                    g.get("f30", 0), "", "", "",
                 ])
                 hist_keys.add((d_iso, h_norm, a_norm))
                 if earliest_new_date is None or d_iso < earliest_new_date:
@@ -328,7 +371,7 @@ def sync_single_mode(pub_dir, mk, finals_by_date):
         cut_pairs = set()
         for idx_r, arr in enumerate(hist_raw):
             d_iso = str(arr[0])
-            s_cur = str(arr[2] or season_of_date(d_iso))
+            s_cur = season_of_date(d_iso)
             h12 = [str(x) for x in (arr[8] if isinstance(arr[8], list) else [])]
             h_dyn = str(arr[9] or "")
             hist.append({
@@ -350,7 +393,7 @@ def sync_single_mode(pub_dir, mk, finals_by_date):
             sched.add((g["d"], norm_team(g["a"])))
             dt = date(*map(int, g["d"].split("-")))
             mon = (dt - timedelta(days=dt.weekday())).isoformat()
-            s_cur = g.get("s") or season_of_date(g["d"])
+            s_cur = season_of_date(g["d"])
             cut_pairs.add((mon, s_cur))
             cut_pairs.add((g["d"], s_cur))
 
@@ -415,8 +458,6 @@ def sync_single_mode(pub_dir, mk, finals_by_date):
             sgn = 1 if hfav else -1
             pred = g["h"] if hfav else g["a"]
             opp = g["a"] if hfav else g["h"]
-            g["pw"] = pred
-            g["fpw"] = pred
             g["sys_win"] = pred
             g["twWin"] = pred
             g["twVotes"] = f"{hw}H-{aw}A"
@@ -447,7 +488,7 @@ def sync_single_mode(pub_dir, mk, finals_by_date):
 
             pb2b = (yest, pred) in sched and (yest, opp) not in sched
             ob2b = (yest, opp) in sched and (yest, pred) not in sched
-            is_playoff = (g["d"][5:10] >= "04-18" and m <= 6)
+            is_playoff = (g["d"][5:10] >= "04-15" and m <= 6)
             c4_vote_opp = ((c4["hw"] - c4["aw"]) * sgn < 0)
 
             t1 = (not hfav) and (f30_o < 10 or (fav_v3 < 2 and fav_v4 < 3))
@@ -482,27 +523,184 @@ def sync_single_mode(pub_dir, mk, finals_by_date):
             g["vip_idx3_day"] = bool(g4 and not wtrap_dy and (wtp_dy["mel"] == "FIRE" or (nat and fav_v4 == 4 and min_o4 >= 2)))
 
     if updated_scores > 0 or earliest_new_date is not None:
+        pd["deg1"] = DEG1_BASE
+        pd["deg1Sign"] = DEG1_SIGN
+        pd["deg1Element"] = DEG1_ELEMENT
         json.dump(pd, open(p_path, "w", encoding="utf-8"), ensure_ascii=False, separators=(",", ":"))
     return updated_scores, pd
 
-def sync_google_sheets(pd_best, target_iso):
-    if not os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON"):
+
+def save_local_and_optional_sheets(pd_mode_c, pub_dir, target_iso):
+    """
+    Always writes local JSON backups of NHL-PLAYERS-GEOMANTIC-INPUT and NHL-PLAYERS-CALCULATION
+    into artifacts/api-server/data/, and ONLY syncs to Google Sheets when BOTH:
+      1) NHL_PLAYER_INPUT_SHEET_ID / NHL_PLAYER_CALC_SHEET_ID are set in environment
+      2) GOOGLE_SERVICE_ACCOUNT_JSON is set in environment
+    Live NBA sheets are blocked at the client layer and never touched.
+    """
+    os.makedirs(DATA_DIR, exist_ok=True)
+    today_games = [g for g in pd_mode_c["games"] if g["d"] == target_iso]
+    if not today_games:
+        # Fallback to latest date with games on or before target_iso
+        cand_dates = sorted({g["d"] for g in pd_mode_c["games"] if g["d"] <= target_iso})
+        if cand_dates:
+            target_iso = cand_dates[-1]
+            today_games = [g for g in pd_mode_c["games"] if g["d"] == target_iso]
+
+    sheet1_rows = [["DATE", "WEEKDAY", "DEG1", "DEG1_SIGN", "HOME_TEAM", "AWAY_TEAM", "ARENA", "PUCKDROP_LOCAL", "DEG3_MODE"]]
+    active_player_rows = [[
+        "DATE", "MATCHUP", "SIDE", "TEAM", "PLAYER_FULL_NAME", "JERSEY_NAME", "JERSEY_NO",
+        "POS", "ROLE", "PREGAME_TOI", "DEG1", "DEG2_FULL_NAME", "DEG3_MODE_C",
+        "ELE_P_FAWE", "ELE_FINAL_FAWE", "QUALITY_FIN", "DECAN", "NIGHTLY_POWER",
+    ]]
+    for g in today_games:
+        sheet1_rows.append([
+            g["d"], g["day"], DEG1_BASE, f"{DEG1_SIGN} ({DEG1_ELEMENT})",
+            g["h"], g["a"], g.get("venue", ""), "19:30:00", "MODE_C_JERSEY_NO",
+        ])
+        matchup_lbl = f"{g['a']} @ {g['h']}"
+        for side_lbl, tm_lbl, plist in (("HOME", g["h"], g.get("h_players") or []), ("AWAY", g["a"], g.get("a_players") or [])):
+            for pl in plist:
+                toi_v = pl.get("toi", pl.get("mpg", 0.0))
+                active_player_rows.append([
+                    g["d"], matchup_lbl, side_lbl, tm_lbl,
+                    pl.get("fn", ""), pl.get("jn", ""), str(pl.get("no", "")),
+                    pl.get("pos", ""), "STARTER" if pl.get("st") else "ROTATION",
+                    str(toi_v), str(DEG1_BASE), str(pl.get("d2", "")), str(pl.get("d3", "")),
+                    pl.get("ep", ""), pl.get("ef", ""), pl.get("qf", ""), pl.get("dec", ""), str(pl.get("pwr", 0.0)),
+                ])
+
+    comp_path = os.path.join(pub_dir, "player_modes_comparison.json")
+    comp_data = json.load(open(comp_path, "r", encoding="utf-8")) if os.path.exists(comp_path) else {}
+    bench_rows = [[
+        "MODE_KEY", "DEG1", "DEG1_SIGN", "DEG2_FORMULA", "DEG3_FORMULA",
+        "2024_27_WIN_PCT", "2024_27_RECORD", "VIP_WIN_PCT", "VIP_RECORD",
+        "2024_25_PCT", "2025_26_PCT", "2026_27_LIVE_PCT", "2026_27_RECORD", "RECENT_50_PCT",
+    ]]
+    for mk, f_d3 in (
+        ("mode_c", "Jersey_No_Eff mod 360 (جایگزین کامل)"),
+        ("mode_b", "(EnglishGem(Jersey_Name) + Jersey_No_Eff) mod 360 (جمع با نام پیراهن)"),
+        ("mode_a", "EnglishGem(Jersey_Name) mod 360 (فقط نام پیراهن)"),
+    ):
+        st = comp_data.get(mk, {})
+        t24 = st.get("total_2427", {})
+        vip = st.get("vip_2427", {})
+        s24 = st.get("s2425", {})
+        s25 = st.get("s2526", {})
+        s26 = st.get("s2627", {})
+        l50 = st.get("last50", {})
+        bench_rows.append([
+            mk.upper(), str(DEG1_BASE), f"{DEG1_SIGN} ({DEG1_ELEMENT})",
+            "EnglishGem(Full_Name) mod 360", f_d3,
+            f"{t24.get('pct', 0)}%", f"{t24.get('w', 0)}/{t24.get('n', 0)}",
+            f"{vip.get('pct', 0)}%", f"{vip.get('w', 0)}/{vip.get('n', 0)}",
+            f"{s24.get('pct', 0)}% ({s24.get('w', 0)}/{s24.get('n', 0)})",
+            f"{s25.get('pct', 0)}% ({s25.get('w', 0)}/{s25.get('n', 0)})",
+            f"{s26.get('pct', 0)}%", f"{s26.get('w', 0)}/{s26.get('n', 0)}",
+            f"{l50.get('pct', 0)}% ({l50.get('w', 0)}/{l50.get('n', 0)})",
+        ])
+
+    in_backup = {
+        "spreadsheetTitle": "NHL-PLAYERS-GEOMANTIC-INPUT (Local JSON Backup)",
+        "sheetIdEnvVar": "NHL_PLAYER_INPUT_SHEET_ID",
+        "configuredSheetId": INPUT_SHEET_ID or None,
+        "deg1": DEG1_BASE,
+        "deg1Sign": DEG1_SIGN,
+        "deg1Element": DEG1_ELEMENT,
+        "targetDate": target_iso,
+        "updatedAt": datetime.now(timezone.utc).isoformat(),
+        "tabs": {
+            "Sheet1": sheet1_rows,
+            "NHL-PLAYERS-GEM": "nhl_players_gem.json",
+            "TEAMS": "nhl_gem_sheet.json",
+        },
+    }
+    calc_backup = {
+        "spreadsheetTitle": "NHL-PLAYERS-CALCULATION (Local JSON Backup)",
+        "sheetIdEnvVar": "NHL_PLAYER_CALC_SHEET_ID",
+        "configuredSheetId": CALC_SHEET_ID or None,
+        "deg1": DEG1_BASE,
+        "deg1Sign": DEG1_SIGN,
+        "deg1Element": DEG1_ELEMENT,
+        "targetDate": target_iso,
+        "updatedAt": datetime.now(timezone.utc).isoformat(),
+        "tabs": {
+            "DEG3_Mode_Benchmark": bench_rows,
+            "Active_Player_Calculations": active_player_rows,
+        },
+    }
+    json.dump(in_backup, open(os.path.join(DATA_DIR, "nhl_sheet_input_backup.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+    json.dump(calc_backup, open(os.path.join(DATA_DIR, "nhl_sheet_calc_backup.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+
+    if not INPUT_SHEET_ID or not os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON"):
         return False
     try:
         sys.path.insert(0, HERE)
         from _lib.sheets import open_sheet
         sh_in = open_sheet(INPUT_SHEET_ID)
         ws1 = sh_in.sheet1
-        today_games = [g for g in pd_best["games"] if g["d"] == target_iso]
-        if today_games:
-            rows = [["DATE", "WEEKDAY", "DEG1", "HOME_TEAM", "AWAY_TEAM", "ARENA", "PUCKDROP_LOCAL", "DEG3_MODE"]]
-            for g in today_games:
-                rows.append([g["d"], g["day"], 88, g["h"], g["a"], g.get("venue", ""), "19:30:00", "MODE_C_JERSEY_NO"])
+        if len(sheet1_rows) > 1:
             ws1.clear()
-            ws1.update(values=rows, range_name="A1", value_input_option="RAW")
+            ws1.update(values=sheet1_rows, range_name="A1", value_input_option="RAW")
+        if CALC_SHEET_ID:
+            sh_calc = open_sheet(CALC_SHEET_ID)
+            try:
+                ws_b = sh_calc.worksheet("DEG3_Mode_Benchmark")
+                ws_b.clear()
+                ws_b.update(values=bench_rows, range_name="A1", value_input_option="RAW")
+            except Exception:
+                pass
         return True
     except Exception:
         return False
+
+
+def print_game_terminal_report(pd_mode_c, target_date="", game_index=0):
+    games = [g for g in pd_mode_c["games"] if (not target_date or g["d"] == target_date) and (g.get("h_players") or g.get("a_players"))]
+    if not games:
+        games = [g for g in pd_mode_c["games"] if g.get("h_players") or g.get("a_players")]
+    if not games:
+        print("No NHL games with player cards found.")
+        return
+    g = games[min(max(0, game_index), len(games) - 1)]
+    print("=" * 88)
+    print(f"🏒 NHL-PLAYER-SIGNAL LIVE TERMINAL TEST • DEG1 = {DEG1_BASE} ({DEG1_SIGN} / {DEG1_ELEMENT})")
+    print("=" * 88)
+    print(f"Game #{g['n']} | Date: {g['d']} ({g['day']} • {g.get('sh_d','')}) | Season: {g['s']}")
+    print(f"Matchup   : {g['a']} ({g['ac']}) @ {g['h']} ({g['hc']})")
+    print(f"Host Arena: {g.get('venue','')} | Coords: ({g.get('lat','')}, {g.get('lon','')}) | TZ: {g.get('tz','')}")
+    print(f"Degrees   : DEG1={DEG1_BASE} ({DEG1_SIGN}/{DEG1_ELEMENT}) | DEGVec={g.get('deg')}")
+    print("-" * 88)
+    for side_lbl, tm_name, tm_code, plist, outs in (
+        ("HOME", g["h"], g["hc"], g.get("h_players") or [], g.get("h_out") or []),
+        ("AWAY", g["a"], g["ac"], g.get("a_players") or [], g.get("a_out") or []),
+    ):
+        print(f"[{side_lbl}] {tm_name} ({tm_code}) — Top-{len(plist)} Active Players (TOI-Weighted, Mode C):")
+        for idx_p, pl in enumerate(plist, 1):
+            toi_v = pl.get("toi", pl.get("mpg", 0.0))
+            st_tag = "★" if pl.get("st") else " "
+            print(
+                f"  {idx_p}. {st_tag} #{str(pl['no']):<2} {pl['fn']:<24} ({pl.get('pos',''):<2}) | "
+                f"TOI={toi_v:>4.1f}m | DEG2={pl['d2']:>3} | DEG3={pl['d3']:>3} | "
+                f"ELE-P={pl['ep']} | FIN={pl['ef']} | Pwr={pl['pwr']:+5.1f}"
+            )
+        if outs:
+            print(f"  Excluded Injured (OUT/IR/IR-LT/IR-NR/Susp): {', '.join(outs)}")
+        print("-" * 88)
+    print(f"HOME 12-Col Elemental Polarity : {g.get('h_12')}")
+    print(f"AWAY 12-Col Elemental Polarity : {g.get('a_12')}")
+    print(f"Geomantic Figures (HOME)       : GEO-FIN={g.get('h_geo')} | GEO-DYN={g.get('h_geo_dyn')} | GEO-TAB={g.get('h_geo_tab')}")
+    print(f"5-Method 30-Vote Fusion (F30)  : F30={g.get('f30'):+d} (Votes={g.get('mv')}, Agree5={g.get('ag5')}/5)")
+    print(f"4-Channel 3-Number Array (idx3): {g.get('idx3')}")
+    print(f"Twin Pool ({g.get('twMode')})              : Votes={g.get('twVotes')} ({g.get('twPct')}) | Natural5-7={g.get('is_nat')}")
+    for tw in (g.get("twins") or [])[:7]:
+        print(f"    Twin -> {tw[0]} | {tw[1]} {tw[3]}-{tw[4]} {tw[2]} (mg={tw[5]:+d})")
+    wtp = g.get("wtp") or {}
+    print(f"Standings / Log5 Element       : H_RK=#{wtp.get('hrk')} ({wtp.get('hwl')}) vs A_RK=#{wtp.get('ark')} ({wtp.get('awl')}) | Log5={wtp.get('mel')} | ΔTP={wtp.get('dtp')}")
+    print(f"Predicted Winner               : {g.get('sys_win')} | Tier={g.get('tier')} | f1_wtp={g.get('f1_wtp')} | VIP={g.get('vip_idx3')}")
+    print(f"Actual ESPN Score / Status     : {g.get('sc')} | Winner={g.get('aw')} | Outcome={g.get('st')}")
+    print("=" * 88)
+
 
 def main():
     ap = argparse.ArgumentParser()
@@ -510,14 +708,17 @@ def main():
     ap.add_argument("--end-date", default="")
     ap.add_argument("--target-date", default="")
     ap.add_argument("--pub-dir", default="")
+    ap.add_argument("--test-game", action="store_true", help="Print detailed terminal report for a real NHL game")
+    ap.add_argument("--game-index", type=int, default=0)
     args = ap.parse_args()
 
     pub_dir = args.pub_dir or DEFAULT_PUB_DIR
-    base_c = json.load(open(os.path.join(pub_dir, "player_nhl_preds_mode_c.json"), "r", encoding="utf-8"))
+    base_c_path = os.path.join(pub_dir, "player_nhl_preds_mode_c.json")
+    base_c = json.load(open(base_c_path, "r", encoding="utf-8"))
 
     today_utc = datetime.now(timezone.utc).date()
     max_check_iso = (today_utc + timedelta(days=1)).isoformat()
-    min_recent_iso = (today_utc - timedelta(days=5)).isoformat()
+    min_recent_iso = (today_utc - timedelta(days=4)).isoformat()
 
     dates_to_check = set()
     for g in base_c["games"]:
@@ -544,9 +745,12 @@ def main():
     sync_single_mode(pub_dir, "mode_b", finals_by_date)
     sync_single_mode(pub_dir, "mode_a", finals_by_date)
 
-    sheet_synced = sync_google_sheets(pd_c or base_c, args.target_date or today_utc.isoformat())
-
     pd_use = pd_c or base_c
+    sheet_synced = save_local_and_optional_sheets(pd_use, pub_dir, args.target_date or today_utc.isoformat())
+
+    if args.test_game:
+        print_game_terminal_report(pd_use, target_date=args.target_date, game_index=args.game_index)
+
     done_all = [g for g in pd_use["games"] if g.get("done")]
     oos = [g for g in done_all if g.get("f1_wtp")]
     oos_w = sum(1 for g in oos if g.get("sys_win") == g.get("aw"))
@@ -555,15 +759,20 @@ def main():
 
     payload = {
         "ok": True,
+        "league": "NHL",
+        "deg1": DEG1_BASE,
+        "deg1Sign": DEG1_SIGN,
+        "deg1Element": DEG1_ELEMENT,
         "updatedScores": upd_c,
         "checkedDates": sorted_dates,
         "sheetSynced": sheet_synced,
+        "localBackupSaved": True,
         "totalDone": len(done_all),
         "oosF1": {"w": oos_w, "n": len(oos), "pct": round(100.0 * oos_w / max(1, len(oos)), 1)},
         "s2627": {"w": s26_w, "n": len(s26), "pct": round(100.0 * s26_w / max(1, len(s26)), 1)},
     }
     print("__NHL_SYNC__ " + json.dumps(payload, ensure_ascii=False))
-    print("__RESULT__ " + json.dumps({"ok": True, "rowsWritten": upd_c, "message": f"Synced {upd_c} NHL games across all 3 DEG3 modes"}, ensure_ascii=False))
+
 
 if __name__ == "__main__":
     main()

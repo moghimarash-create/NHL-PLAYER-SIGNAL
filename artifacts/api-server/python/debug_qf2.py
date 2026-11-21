@@ -16,7 +16,7 @@ import google.auth.transport.requests
 from google.oauth2.service_account import Credentials
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
-SEARCH_SIGNALS_ID = "1oQhRX2ZsLVlPDV2y0ToA7BfMdtblbh9ygav2yMpzj1k"
+SEARCH_SIGNALS_ID = os.environ.get("NHL_SEARCH_SIGNALS_SHEET_ID", "")
 
 TARGET = sys.argv[1] if len(sys.argv) > 1 else "6/6/2026"
 

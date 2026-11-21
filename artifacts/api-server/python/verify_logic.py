@@ -65,9 +65,9 @@ from step4_search_signals import (
 )
 
 # ---- Config: identical IDs / tab to step4_search_signals.py ----
-SEARCH_SIGNALS_ID = "1oQhRX2ZsLVlPDV2y0ToA7BfMdtblbh9ygav2yMpzj1k"
-DATA_SEARCH_KEY_ID = "1C51kkj4mcQX5kLvZe_TlmdwxKNf4pagtvMqU2pZjXzU"
-FINAL_SIGNAL_ID = "1RX-sKBwgt3KghRH-CuL_fCOmJND6dKnx1ORX44SkOfc"
+SEARCH_SIGNALS_ID = os.environ.get("NHL_SEARCH_SIGNALS_SHEET_ID", "")
+DATA_SEARCH_KEY_ID = os.environ.get("NHL_DATA_SEARCH_KEY_SHEET_ID", "")
+FINAL_SIGNAL_ID = os.environ.get("NHL_FINAL_SIGNAL_SHEET_ID", "")
 
 MARKET = "DJIA"
 DJIA_TAB = "KEY-MATCH-DJIA"

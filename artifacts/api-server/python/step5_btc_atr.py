@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from _lib.runner import emit_result, log  # noqa: E402
 
-SHEET_ID = "1sAszvBu7Ji83vsjuyN1dJXjpf2OTc1oAzIxYGEfv2-A"
+SHEET_ID = os.environ.get("NHL_AUX_SHEET_ID", "")
 WORKSHEET_NAME = os.environ.get("STEP5_WORKSHEET_NAME", "Sheet1")
 COINBASE_PRODUCT_ID = os.environ.get("COINBASE_PRODUCT_ID", "BTC-USD")
 COINBASE_BASE_URL = os.environ.get(

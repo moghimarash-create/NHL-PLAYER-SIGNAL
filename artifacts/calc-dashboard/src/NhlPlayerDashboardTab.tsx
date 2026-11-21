@@ -12,15 +12,15 @@ import { Loader2, RefreshCw } from "lucide-react";
 
 const NHL_TEAM_KALSHI_MAP: Record<string, string> = {
   "anaheim ducks": "ANA",
-  "arizona coyotes": "ARI",
-  "atlanta thrashers": "ATL",
+  "arizona coyotes": "UTA",
+  "atlanta thrashers": "WPG",
   "boston bruins": "BOS",
   "buffalo sabres": "BUF",
-  "carolina hurricanes": "CAR",
-  "columbus blue jackets": "CBJ",
   "calgary flames": "CGY",
+  "carolina hurricanes": "CAR",
   "chicago blackhawks": "CHI",
   "colorado avalanche": "COL",
+  "columbus blue jackets": "CBJ",
   "dallas stars": "DAL",
   "detroit red wings": "DET",
   "edmonton oilers": "EDM",
@@ -28,16 +28,16 @@ const NHL_TEAM_KALSHI_MAP: Record<string, string> = {
   "los angeles kings": "LA",
   "minnesota wild": "MIN",
   "montreal canadiens": "MTL",
-  "new jersey devils": "NJ",
   "nashville predators": "NSH",
+  "new jersey devils": "NJ",
   "new york islanders": "NYI",
   "new york rangers": "NYR",
   "ottawa senators": "OTT",
   "philadelphia flyers": "PHI",
-  "phoenix coyotes": "PHX",
+  "phoenix coyotes": "UTA",
   "pittsburgh penguins": "PIT",
-  "seattle kraken": "SEA",
   "san jose sharks": "SJ",
+  "seattle kraken": "SEA",
   "st. louis blues": "STL",
   "tampa bay lightning": "TB",
   "toronto maple leafs": "TOR",
@@ -45,15 +45,8 @@ const NHL_TEAM_KALSHI_MAP: Record<string, string> = {
   "utah hockey club": "UTA",
   "vancouver canucks": "VAN",
   "vegas golden knights": "VGK",
-  "winnipeg jets": "WPG",
   "washington capitals": "WSH",
-};
-
-const NHL_CODE_OVERRIDES: Record<string, string> = {
-  LAK: "LA",
-  NJD: "NJ",
-  SJS: "SJ",
-  TBL: "TB",
+  "winnipeg jets": "WPG",
 };
 
 function elemCodeFromFinal4(el12: string[]): string {
@@ -190,6 +183,7 @@ type NbaGamePred = {
     no: string;
     pos: string;
     st: boolean;
+    toi?: number;
     mpg: number;
     d2: number;
     d3: number;
@@ -206,6 +200,7 @@ type NbaGamePred = {
     no: string;
     pos: string;
     st: boolean;
+    toi?: number;
     mpg: number;
     d2: number;
     d3: number;
@@ -306,12 +301,12 @@ type PoolNumIndex = {
 function computePoolNumIndex(rows: HistGameRow[]): PoolNumIndex {
   const rawH = rows.filter((r) => r.mg > 0).map((r) => Math.abs(r.mg));
   const rawA = rows.filter((r) => r.mg < 0).map((r) => Math.abs(r.mg));
-  const capH = rawH.map((m) => Math.min(5, Math.max(1, Math.round(m))));
-  const capA = rawA.map((m) => Math.min(5, Math.max(1, Math.round(m))));
+  const capH = rawH.map((m) => Math.min(5, Math.max(1, Math.ceil(m / 4))));
+  const capA = rawA.map((m) => Math.min(5, Math.max(1, Math.ceil(m / 4))));
   const hw = capH.length;
   const aw = capA.length;
-  const cappedH = rawH.some((m) => m > 5);
-  const cappedA = rawA.some((m) => m > 5);
+  const cappedH = rawH.some((m) => m > 20);
+  const cappedA = rawA.some((m) => m > 20);
 
   let idxH = 0;
   let formulaH = "0";
@@ -389,7 +384,7 @@ const MANUAL_COL_META: { idx: number; key: string; group: string; sub: string }[
 function decodeGeoTabFa(code: string): string {
   if (!code || code.length < 4) return "شکل رمل جدول روزانه";
   const tierFa = (b1: string, b2: string) =>
-    b1 === "1" ? "۱۰ تیم اول (#1-10)" : b2 === "1" ? "میانه جدول (#11-20)" : "۱۰ تیم آخر (#21-30)";
+    b1 === "1" ? "۱۰ تیم اول (#1-10)" : b2 === "1" ? "میانه جدول (#11-20)" : "۱۲ تیم آخر (#21-32)";
   return `میزبان: ${tierFa(code[0], code[1])} | میهمان: ${tierFa(code[2], code[3])}`;
 }
 
@@ -602,12 +597,12 @@ const TWIN_PATTERN_DEFS: {
     key: "twVipIdx3",
     titleFa: "سطح ویژه عنصر آتش FIRE ضریب Log5 یا اجماع ۴ از ۴ شاخص تقویت‌شده Δ+S",
     titleEn: "VIP FIRE Odds-Element (Log5 ≥ 58%) or 4/4 Δ+S Index Consensus",
-    formulaFa: "سیگنال‌های تمیز سیستم نهایی NHL (DEG1=88) که در لایه ضریب جدول به عنصر آتش FIRE (≥۵۸٪) می‌رسند یا اجماع ۴ از ۴ شاخص تقویت‌شده Δ+S در هر ۴ کانال مستقل (STEP، GEO-FIN، GEO-DYN، GEO-TAB) با Δmin≥2 دارند (سقف خرید تا ۷۶¢)",
+    formulaFa: "سیگنال‌های تمیز سیستم نهایی NHL-PLAYER-SIGNAL (DEG1=88 (28 GEMINI)) که در لایه ضریب جدول به عنصر آتش FIRE (≥۵۸٪) می‌رسند یا اجماع ۴ از ۴ شاخص تقویت‌شده Δ+S در هر ۴ کانال مستقل (STEP، GEO-FIN، GEO-DYN، GEO-TAB) با Δmin≥2 دارند (سقف خرید تا ۷۶¢)",
   },
   {
     key: "twF1Wtp",
-    titleFa: "سیستم نهایی NHL + ۴ کانال تقویت‌شده Δ+S + شکل رملی روزانه جدول GEO-TAB + ضریب Log5",
-    titleEn: "NHL Final System + 4-Channel Δ+S + GEO-TAB Standings Figure + Log5 Element",
+    titleFa: "سیستم نهایی NHL-PLAYER-SIGNAL + ۴ کانال تقویت‌شده Δ+S + شکل رملی روزانه جدول GEO-TAB + ضریب Log5",
+    titleEn: "NHL-PLAYER-SIGNAL Final System + 4-Channel Δ+S + GEO-TAB Standings Figure + Log5 Element",
     formulaFa: "همزاد ۵ تا ۷ ردیف (≥۷۱٪ هم‌جهت با Fusion 30) + شاخص ۴ کاناله تقویت‌شده Δ+S (شامل کانال ۴ شکل رملی ۴ خطی روزانه جدول GEO-TAB و سپر پلی‌آف) + حفظ عناصر FIRE/AIR/WATER و اخراج فقط EARTH (<۴۴٪)",
   },
   {
@@ -620,42 +615,42 @@ const TWIN_PATTERN_DEFS: {
     key: "twF1Idx",
     titleFa: "تلفیق پایه همزاد + شاخص عددی پایه بدون نگهبان تله (Idx هم‌جهت)",
     titleEn: "NHL Base Combo + Numerical Index Filter",
-    formulaFa: "واجد شرایط همزاد ۵ تا ۷ ردیف (DEG1=88 • ≥۷۱٪) هم‌جهت با Fusion 30 به شرط هم‌جهت بودن شاخص عددی استخر (واحد ۱ گله هاکی NHL با سقف ۵ واحد برای حذف بردهای پرت)",
+    formulaFa: "واجد شرایط همزاد ۵ تا ۷ ردیف (DEG1=88 (28 GEMINI) • ≥۷۱٪) هم‌جهت با Fusion 30 به شرط هم‌جهت بودن شاخص عددی استخر (شاخص عددی همزاد با سقف ۵ واحد برای حذف بردهای پرت)",
   },
   {
     key: "twF1Union",
-    titleFa: "اتحاد سیستم نهایی NHL + نجات شاخص ۳ کاناله (اجماع ۳/۳ + جدول هفتگی)",
-    titleEn: "NHL Final System UNION 3-Channel Index Rescue",
-    formulaFa: "اتحاد سیستم نهایی NHL با بازی‌های دارای اجماع ۳ از ۳ شاخص عددی مستقل (STEP + GEO-FIN + GEO-DYN با Δmin≥1) بدون تله درونی و با تایید جدول هفتگی (ΔTP > -8)",
+    titleFa: "اتحاد سیستم نهایی NHL-PLAYER-SIGNAL + نجات شاخص ۳ کاناله (اجماع ۳/۳ + جدول هفتگی)",
+    titleEn: "NHL-PLAYER-SIGNAL Final System UNION 3-Channel Index Rescue",
+    formulaFa: "اتحاد سیستم نهایی NHL-PLAYER-SIGNAL با بازی‌های دارای اجماع ۳ از ۳ شاخص عددی مستقل (STEP + GEO-FIN + GEO-DYN با Δmin≥1) بدون تله درونی و با تایید جدول هفتگی (ΔTP > -8)",
   },
   {
     key: "tall",
-    titleFa: "۶. کل ۴٬۱۳۶ بازی NHL (۲۰۲۴ تا ۲۰۲۷) + همزادهای ۲۰۱۰–۲۰۲۶",
+    titleFa: "۶. کل ۴٬۱۳۶ بازی هاکی NHL (۲۰۲۴ تا ۲۰۲۷) + همزادهای ۲۰۱۰–۲۰۲۶",
     titleEn: "All 4,136 NHL Games (2024–2027)",
-    formulaFa: "نمایش تمام بازی‌های NHL در سه فصل ۲۰۲۴–۲۰۲۵، ۲۰۲۵–۲۰۲۶ و ۲۰۲۶–۲۰۲۷ به همراه ۵ تا ۷ همزاد المنتی استخراج‌شده از ۲۱٬۶۲۴ بازی تاریخی (۲۰۱۰–۲۰۲۶) با ثابت DEG1=88",
+    formulaFa: "نمایش تمام بازی‌های هاکی NHL در سه فصل ۲۰۲۴–۲۰۲۵، ۲۰۲۵–۲۰۲۶ و ۲۰۲۶–۲۰۲۷ به همراه ۵ تا ۷ همزاد المنتی استخراج‌شده از ۲۱٬۶۲۴ بازی تاریخی (۲۰۱۰–۲۰۲۶) با ثابت DEG1=88 (28 GEMINI)",
   },
 ];
 
-const FUSION_PATTERN_DEFS: { key: FusionPatternKey; titleFa: string; titleEn: string; formulaFa: string }[] = TWIN_PATTERN_DEFS as any;
-const SINGLE_PATTERN_DEFS: { key: SinglePatternKey; titleFa: string; titleEn: string; formulaFa: string }[] = TWIN_PATTERN_DEFS as any;
+const FUSION_PATTERN_DEFS: { key: FusionPatternKey; titleFa: string; titleEn: string; formulaFa: string }[] =
+  TWIN_PATTERN_DEFS as unknown as { key: FusionPatternKey; titleFa: string; titleEn: string; formulaFa: string }[];
+const SINGLE_PATTERN_DEFS: { key: SinglePatternKey; titleFa: string; titleEn: string; formulaFa: string }[] =
+  TWIN_PATTERN_DEFS as unknown as { key: SinglePatternKey; titleFa: string; titleEn: string; formulaFa: string }[];
 
 const DAILY_QUICK_DATES = [
   { label: "All Dates (همه روزها)", date: "ALL" },
-  { label: "2026-11-16 (Mon • 2 Games)", date: "2026-11-16" },
-  { label: "2026-11-17 (Tue • 11 Games)", date: "2026-11-17" },
-  { label: "2026-11-18 (Wed • 3 Games)", date: "2026-11-18" },
-  { label: "2026-11-19 (Thu • 12 Games)", date: "2026-11-19" },
-  { label: "2026-11-21 (Sat • 14 Games)", date: "2026-11-21" },
-  { label: "2026-11-22 (Sun • 5 Games)", date: "2026-11-22" },
-  { label: "2026-11-23 (Mon • 7 Games)", date: "2026-11-23" },
+  { label: "2026-11-14 (Sat • NHL)", date: "2026-11-14" },
+  { label: "2026-11-16 (Mon • NHL)", date: "2026-11-16" },
+  { label: "2026-11-18 (Wed • NHL)", date: "2026-11-18" },
+  { label: "2026-11-19 (Thu • NHL)", date: "2026-11-19" },
+  { label: "2026-11-20 (Fri • NHL)", date: "2026-11-20" },
+  { label: "2026-11-21 (Sat • NHL)", date: "2026-11-21" },
+  { label: "2026-11-22 (Sun • NHL)", date: "2026-11-22" },
 ];
 
 const KALSHI_MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
 
 function getTeam3Code(teamName: string): string {
   const clean = teamName.replace(/\s*\(EL:.*$/, "").trim();
-  const upper = clean.toUpperCase();
-  if (NHL_CODE_OVERRIDES[upper]) return NHL_CODE_OVERRIDES[upper];
   const mapped = NHL_TEAM_KALSHI_MAP[clean.toLowerCase()];
   if (mapped) return mapped;
   return clean.slice(0, 3).toUpperCase();
@@ -676,7 +671,7 @@ function buildKalshiNbaTicker(dateStr: string, awayTeam: string, homeTeam: strin
 
 export type PlayerDeg3Mode = "mode_c" | "mode_b" | "mode_a";
 
-export default function NhlDashboardTab({
+export default function NhlPlayerDashboardTab({
   playerMode = "mode_c",
 }: {
   playerMode?: PlayerDeg3Mode;
@@ -690,7 +685,7 @@ export default function NhlDashboardTab({
   const [manualPersp, setManualPersp] = useState<"home" | "away">("home");
   const [manualDayFilter, setManualDayFilter] = useState<string>("ALL");
   const [openDailyCardsSection, setOpenDailyCardsSection] = useState<boolean>(true);
-  const [dailyCardDate, setDailyCardDate] = useState<string>("2026-11-21");
+  const [dailyCardDate, setDailyCardDate] = useState<string>("2026-11-20");
   const [manualGeoKind, setManualGeoKind] = useState<"fin" | "dyn">("fin");
   const [monthlyCalendarKind, setMonthlyCalendarKind] = useState<"shamsi" | "greg">("shamsi");
   const [syncBusy, setSyncBusy] = useState<boolean>(false);
@@ -758,10 +753,10 @@ export default function NhlDashboardTab({
   const [manualOpenGames, setManualOpenGames] = useState<Record<number, boolean>>({});
   const [manualShowAllRows, setManualShowAllRows] = useState<Record<number, boolean>>({});
   const [copiedGame, setCopiedGame] = useState<number | null>(null);
-  const MANUAL_STORAGE_KEY = "nhl-player-manual-filters-ele12-v1";
+  const MANUAL_STORAGE_KEY = "nhl-manual-filters-ele12-v1";
   const [manualFilters, setManualFilters] = useState<Record<number, ManualFilterState>>(() => {
     try {
-      const raw = localStorage.getItem("nhl-player-manual-filters-ele12-v1");
+      const raw = localStorage.getItem("nhl-manual-filters-ele12-v1");
       return raw ? JSON.parse(raw) : {};
     } catch {
       return {};
@@ -845,7 +840,7 @@ export default function NhlDashboardTab({
         if (!cancelled && d?.markets && Object.keys(d.markets).length > 0) {
           setKalshiMarkets(d.markets);
         } else {
-          fetch("/kalshi_nhl_markets.json")
+          fetch("/api/kalshi/nhl-markets")
             .then((r2) => (r2.ok ? r2.json() : null))
             .then((d2) => {
               if (!cancelled && d2?.markets) setKalshiMarkets(d2.markets);
@@ -937,7 +932,7 @@ export default function NhlDashboardTab({
       try {
         sessionStorage.setItem(
           "nhl_sync_toast_v1",
-          "بروزرسانی زنده نتایج واقعی بازی‌های NHL از ESPN انجام شد و کارت‌ها با آخرین نتایج واقعی آپدیت شدند ✓"
+          "بروزرسانی زنده نتایج واقعی بازی‌های هاکی NHL از ESPN انجام شد و کارت‌ها با آخرین نتایج واقعی آپدیت شدند ✓"
         );
       } catch {}
       const r = await fetch("/api/nhl/sync", {
@@ -993,7 +988,7 @@ export default function NhlDashboardTab({
           `بروزرسانی زنده نتایج واقعی ESPN انجام شد (${d.updatedScores ?? 0} نتیجه جدید ثبت شد • کل بازی‌های انجام‌شده: ${d.totalDone ?? 0} • دقت فصل جاری: ${d.s2627?.pct ?? 84.6}% [${d.s2627?.w ?? 22}/${d.s2627?.n ?? 26}])`
         );
       } else {
-        setSyncMsg(d?.error ?? "خطا در بروزرسانی نتایج واقعی NHL");
+        setSyncMsg(d?.error ?? "خطا در بروزرسانی نتایج واقعی هاکی NHL");
       }
     } catch (e) {
       try { sessionStorage.removeItem('nhl_sync_toast_v1'); } catch {}
@@ -1161,21 +1156,21 @@ export default function NhlDashboardTab({
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <Badge className="bg-emerald-600 text-white hover:bg-emerald-700" dir="ltr">
-                NHL PLAYER ASTRO-ELEMENTAL SYSTEM • DEG1 = 88 FIXED (2010–2027 • 22,610 GAMES)
+                NHL-PLAYER-SIGNAL • DEG1 = 88 (28 GEMINI / AIR) FIXED • 32 NHL TEAMS (2010–2027 • 22,610 GAMES)
               </Badge>
               <Badge variant="outline" className="border-sky-300 text-sky-900 bg-white" dir="ltr">
-                {games.length} Target Games + {histGames.length || 21499} Player-Weighted Twins DB
+                {games.length || 4136} Target NHL Games + {histGames.length || 21624} TOI-Weighted Twins DB
               </Badge>
               <Badge variant="outline" className="border-amber-300 text-amber-950 bg-amber-50 font-bold">
                 {playerMode === "mode_c"
-                  ? "DEG1=88 ثابت | DEG2=نام کامل بازیکن | DEG3=شماره پیراهن (جایگزین)"
+                  ? "DEG1 = 88 (28 GEMINI / عنصر AIR) | DEG2=نام کامل بازیکن | DEG3=شماره پیراهن (حالت C)"
                   : playerMode === "mode_b"
-                    ? "DEG1=88 ثابت | DEG2=نام کامل بازیکن | DEG3=نام پیراهن + شماره پیراهن"
-                    : "DEG1=88 ثابت | DEG2=نام کامل بازیکن | DEG3=نام روی پیراهن"}
+                    ? "DEG1 = 88 (28 GEMINI / عنصر AIR) | DEG2=نام کامل بازیکن | DEG3=نام پیراهن + شماره پیراهن (حالت B)"
+                    : "DEG1 = 88 (28 GEMINI / عنصر AIR) | DEG2=نام کامل بازیکن | DEG3=نام روی پیراهن (حالت A)"}
               </Badge>
             </div>
             <h2 className="text-lg md:text-xl font-bold text-slate-900 mt-1.5">
-              موتور پیش‌بینی بازیکن‌محور NHL (ترکیب ۱۳ بازیکن فعال بر اساس زمان حضور روی یخ TOI: ۱۲ اسکیت‌باز + ۱ دروازه‌بان • همزادیاب ۵ تا ۷ ردیف + شاخص ۴ کاناله Δ+S + نگهبان تله + ضریب هفتگی Log5)
+              موتور پیش‌بینی بازیکن‌محور NHL-PLAYER-SIGNAL برای ۳۲ تیم هاکی NHL (ترکیب ۸ بازیکن فعال بر اساس میانگین زمان روی یخ TOI با حذف مصدومان OUT/IR/IR-LT/IR-NR/Suspension • شیت NHL-PLAYERS-GEM • DEG1 = 88 [28 GEMINI])
             </h2>
             {syncMsg && (
               <div className="mt-1 text-xs font-bold text-emerald-800 bg-emerald-50 border border-emerald-300 rounded px-2.5 py-1 inline-block">
@@ -1218,7 +1213,7 @@ export default function NhlDashboardTab({
                     : "text-slate-700 hover:bg-emerald-50"
                 }`}
               >
-                📊 پترن‌های آماری و جدول خلاصه سیستم جدید NHL
+                📊 پترن‌های آماری و جدول خلاصه سیستم NHL-PLAYER-SIGNAL
               </button>
             </div>
             <button
@@ -1229,7 +1224,7 @@ export default function NhlDashboardTab({
               className="inline-flex items-center gap-1.5 text-xs font-bold bg-emerald-600 text-white px-3 py-1.5 rounded-md hover:bg-emerald-700 transition-colors shadow-sm"
             >
               <RefreshCw className={`h-3.5 w-3.5 ${syncBusy ? "animate-spin" : ""}`} />
-              بروزرسانی زنده نتایج واقعی بازی‌های NHL
+              بروزرسانی زنده نتایج واقعی بازی‌های هاکی NHL
             </button>
             <button
               type="button"
@@ -1284,7 +1279,7 @@ export default function NhlDashboardTab({
           >
             <div className="flex flex-wrap items-center gap-2">
               <span className="px-2.5 py-1 rounded-md bg-sky-700 text-white font-extrabold text-xs shadow-sm">
-                📅 نوار انتخاب روزانه و کارت‌های بازی‌های هر روز از فیلتر دستی (DAILY NHL CARDS • DEG1=88)
+                📅 نوار انتخاب روزانه و کارت‌های بازی‌های هر روز از فیلتر دستی (DAILY NHL CARDS • DEG1=88 (28 GEMINI))
               </span>
               <span className="px-2.5 py-0.5 rounded bg-emerald-100 text-emerald-900 border border-emerald-300 text-xs font-bold font-mono">
                 ✓ متصل به موتور همزادیاب ۲۰۱۰–۲۰۲۶ + مدل تلفیقی ۵ روش ({gamesOnDailyDate.length} کارت در {activeDailyDate})
@@ -1305,7 +1300,7 @@ export default function NhlDashboardTab({
           {openDailyCardsSection && (
             <div className="p-4 space-y-4 bg-sky-50/50">
               <p className="text-xs text-slate-700 leading-relaxed">
-                کارت‌های تصمیم‌گیری سریع با <b>سیستم نهایی NHL (همزادیاب ۱۲ ستونی مستقل DEG1=88 + شاخص ۳ کاناله + سپر تله + لایه المنت ضریب جدول دوشنبه Pythagorean 2.05 &amp; Log5)</b> تنظیم شده‌اند: سه عنصر <b>آتش FIRE (≥۵۸٪)</b>، <b>هوا AIR (۵۱٪–۵۸٪)</b> و <b>آب WATER (۴۴٪–۵۱٪)</b> حفظ می‌شوند تا بازی‌های خوب حذف نشوند و فقط عنصر بازنده <b>خاک EARTH (&lt;۴۴٪)</b> اخراج می‌گردد. سقف خرید Kalshi: <b>آتش FIRE / VIP تا ۷۶¢</b>، <b>هوا AIR تا ۷۲¢</b>، و <b>آب WATER تا ۶۹¢</b>.
+                کارت‌های تصمیم‌گیری سریع با <b>سیستم نهایی NHL-PLAYER-SIGNAL (همزادیاب ۱۲ ستونی مستقل DEG1=88 (28 GEMINI) + شاخص ۳ کاناله + سپر تله + لایه المنت ضریب جدول دوشنبه Pythagorean 13.91 &amp; Log5)</b> تنظیم شده‌اند: سه عنصر <b>آتش FIRE (≥۵۸٪)</b>، <b>هوا AIR (۵۱٪–۵۸٪)</b> و <b>آب WATER (۴۴٪–۵۱٪)</b> حفظ می‌شوند تا بازی‌های خوب حذف نشوند و فقط عنصر بازنده <b>خاک EARTH (&lt;۴۴٪)</b> اخراج می‌گردد. سقف خرید Kalshi: <b>آتش FIRE / VIP تا ۷۶¢</b>، <b>هوا AIR تا ۷۲¢</b>، و <b>آب WATER تا ۶۹¢</b>.
               </p>
 
               {/* Top Control Bar (Mode + Date Selector + Prev/Next Day + Filter + Batch Sync) */}
@@ -1322,7 +1317,7 @@ export default function NhlDashboardTab({
                     data-testid="select-nba-daily-card-mode"
                     className="h-8 rounded border border-sky-300 bg-sky-50 px-2 text-xs font-bold text-sky-950"
                   >
-                    <option value="nhl_best">سیستم نهایی NHL: ۴ کانال تقویت‌شده Δ+S + شکل جدول GEO-TAB + ضریب Log5</option>
+                    <option value="nhl_best">سیستم نهایی NHL-PLAYER-SIGNAL: ۴ کانال تقویت‌شده Δ+S + شکل جدول GEO-TAB + ضریب Log5</option>
                     <option value="nhl_vip3">فقط سطح ویژه آتش FIRE ضریب Log5 یا اجماع ۴/۴ شاخص Δ+S</option>
                     <option value="nhl_f1_guard">نگهبان تله ۴ کاناله Δ+S و خستگی B2B بدون فیلتر EARTH</option>
                     <option value="nhl_f1_idx_raw">تلفیق پایه همزاد + شاخص عددی Δ+S بدون نگهبان تله</option>
@@ -1589,7 +1584,7 @@ export default function NhlDashboardTab({
                 </div>
               )}
 
-              {/* KALSHI NHL AUTO-BETTING & DRY-RUN CONTROL BAR (KXNHLGAME Moneyline) */}
+              {/* KALSHI NBA AUTO-BETTING & DRY-RUN CONTROL BAR (KXNHLGAME Moneyline) */}
               {(() => {
                 // Build current day's order list from cards
                 const buildDayOrders = () =>
@@ -1849,7 +1844,7 @@ export default function NhlDashboardTab({
                           type="button"
                           onClick={async () => {
                             try {
-                              const r = await fetch("/api/kalshi/nhl-markets?force=1");
+                              const r = await fetch("/api/kalshi/markets?force=1");
                               if (r.ok) {
                                 const d = await r.json();
                                 if (d?.markets && Object.keys(d.markets).length > 0) {
@@ -1859,7 +1854,7 @@ export default function NhlDashboardTab({
                               }
                             } catch {}
                             try {
-                              const r2 = await fetch("/kalshi_nhl_markets.json?t=" + Date.now());
+                              const r2 = await fetch("/api/kalshi/nhl-markets?force=1&t=" + Date.now());
                               if (r2.ok) {
                                 const d2 = await r2.json();
                                 if (d2?.markets) setKalshiMarkets(d2.markets);
@@ -2296,7 +2291,7 @@ export default function NhlDashboardTab({
                             <span>{comboOpen ? "▲" : "▼"}</span>
                           </button>
                           <span className="px-2 py-0.5 rounded bg-indigo-100 text-indigo-950 border border-indigo-300 text-[11px] font-bold">
-                            پیش‌فرض خودکار: بازی‌های تاییدشده سیستم جدید NHL ({qualifiedComboOrders.length} بازی واجد شرایط در این روز)
+                            پیش‌فرض خودکار: بازی‌های تاییدشده سیستم NHL-PLAYER-SIGNAL ({qualifiedComboOrders.length} بازی واجد شرایط در این روز)
                           </span>
                           <span className="px-2.5 py-0.5 rounded bg-white border border-indigo-200 font-mono text-xs text-indigo-950 font-extrabold">
                             کمبو فعال: {comboLegOrders.length} بازی • ضریب: {comboMultiplier}x • قیمت منصفانه: {comboFairCents}¢
@@ -3182,7 +3177,7 @@ export default function NhlDashboardTab({
 
                             {/* 3. Three Core New-System Decision Pillars (Trap Guard + Borderline Index + Calibrated Max Buy) */}
                             <div className="grid grid-cols-3 gap-1.5 text-center">
-                              {/* Pillar 1: DEG1=88 5-7 Twin Rule & Internal Trap Guard */}
+                              {/* Pillar 1: DEG1=88 (28 GEMINI) 5-7 Twin Rule & Internal Trap Guard */}
                               <div
                                 className={`rounded-lg px-1.5 py-1.5 border ${
                                   twinRuleOk
@@ -3578,10 +3573,10 @@ export default function NhlDashboardTab({
                                 <div className="rounded-lg border border-sky-200 bg-sky-50/70 p-2 space-y-1.5 text-[10px]" dir="rtl">
                                   <div className="flex flex-wrap items-center justify-between gap-1">
                                     <div className="flex flex-wrap items-center gap-1 font-bold text-sky-950">
-                                      <span>👥 ترکیب ۱۳ بازیکن فعال: ۱۲ اسکیت‌باز + ۱ دروازه‌بان (DEG1=88)</span>
+                                      <span>👥 ترکیب ۸ بازیکن فعال NHL • DEG1 = 88 (28 GEMINI) • وزن زمان روی یخ (TOI)</span>
                                       {outCnt > 0 && (
                                         <span className="px-1.5 py-0.5 rounded bg-rose-100 text-rose-800 border border-rose-300 text-[9px] font-extrabold">
-                                          {outCnt} مصدوم OUT حذف شد
+                                          {outCnt} مصدوم/محروم (OUT/IR/IR-LT/IR-NR/Susp) حذف شد
                                         </span>
                                       )}
                                     </div>
@@ -3629,8 +3624,7 @@ export default function NhlDashboardTab({
                                                 <div key={pl.pid} className="px-1.5 py-0.5 flex items-center justify-between gap-1 text-[9px] font-mono tabular-nums">
                                                   <div className="truncate font-sans font-bold text-slate-900">
                                                     <span className="inline-block w-5 text-sky-800 font-mono">#{pl.no}</span>{" "}
-                                                    <span className={`inline-block px-1 mr-0.5 rounded text-[8px] font-mono ${pl.pos === "G" ? "bg-amber-100 text-amber-900 border border-amber-300 font-extrabold" : "bg-slate-100 text-slate-700"}`}>{pl.pos || "F"}</span>{" "}
-                                                    {pl.fn} <span className="text-slate-400 font-normal">({pl.mpg}m)</span>
+                                                    {pl.fn} <span className="text-slate-400 font-normal">(TOI {pl.toi ?? pl.mpg}m)</span>
                                                   </div>
                                                   <div className="shrink-0 flex items-center gap-1 text-[8.5px]">
                                                     <span className="px-1 rounded bg-sky-50 text-sky-900 border border-sky-200">
@@ -3648,7 +3642,7 @@ export default function NhlDashboardTab({
                                             </div>
                                             {side.outs.length > 0 && (
                                               <div className="px-1.5 py-0.5 bg-rose-50 border-t border-rose-200 text-[8.5px] text-rose-900 font-sans" dir="rtl">
-                                                <b>غایب مصدوم (OUT / IR):</b> {side.outs.join(" ، ")}
+                                                <b>غایبین مصدوم / محروم (OUT, IR, IR-LT, IR-NR, Suspension):</b> {side.outs.join(" ، ")}
                                               </div>
                                             )}
                                           </div>
@@ -5467,7 +5461,7 @@ export default function NhlDashboardTab({
             <div className="p-3 bg-white">
         {loading ? (
           <div className="p-6 text-center text-xs text-slate-500 flex items-center justify-center gap-2">
-            <Loader2 className="h-4 w-4 animate-spin" /> Loading 4,136 NHL games + 2010–2026 Twins...
+            <Loader2 className="h-4 w-4 animate-spin" /> Loading 4,136 NHL games + 2010–2026 TOI-Weighted Twins...
           </div>
         ) : (
           <div className="bg-white border border-sky-200 rounded-md overflow-hidden">
@@ -5688,16 +5682,16 @@ export default function NhlDashboardTab({
                                   </div>
                                 </div>
                                 <div className="bg-white p-2.5 rounded border border-sky-200">
-                                  <div className="font-bold text-slate-700 mb-1">درجات سیستم جدید NHL (DEG1 = 88 ثابت)</div>
-                                  <div><b>میزبان ({g.hc}):</b> DEG1=88 | DEG2={g.deg?.[1]} | DEG3={g.deg?.[2]}</div>
-                                  <div><b>میهمان ({g.ac}):</b> DEG1=88 | DEG2={g.deg?.[3]} | DEG3={g.deg?.[4]}</div>
+                                  <div className="font-bold text-slate-700 mb-1">درجات NHL-PLAYER-SIGNAL • DEG1 = 88 (28 GEMINI / عنصر AIR)</div>
+                                  <div><b>میزبان ({g.hc}):</b> DEG1=88 (28 GEMINI) | DEG2={g.deg?.[1]} | DEG3={g.deg?.[2]}</div>
+                                  <div><b>میهمان ({g.ac}):</b> DEG1=88 (28 GEMINI) | DEG2={g.deg?.[3]} | DEG3={g.deg?.[4]}</div>
                                   <div><b>استادیوم میزبان:</b> {g.venue}</div>
                                   <div><b>تاریخ شمسی:</b> {g.sh_d} ({g.sh_m})</div>
                                 </div>
                                 <div className="bg-white p-2.5 rounded border border-sky-200">
                                   <div className="font-bold text-slate-700 mb-1">درجات نگهبان سیستم اول ۸۸ (S_A1 Guard)</div>
-                                  <div><b>میزبان ({g.hc}):</b> DEG1=88 | DEG2={g.deg?.[5]} | DEG3={g.deg?.[7]}</div>
-                                  <div><b>میهمان ({g.ac}):</b> DEG1=88 | DEG2={g.deg?.[6]} | DEG3={g.deg?.[7]}</div>
+                                  <div><b>میزبان ({g.hc}):</b> DEG1=88 (28 GEMINI) | DEG2={g.deg?.[5]} | DEG3={g.deg?.[7]}</div>
+                                  <div><b>میهمان ({g.ac}):</b> DEG1=88 (28 GEMINI) | DEG2={g.deg?.[6]} | DEG3={g.deg?.[7]}</div>
                                   <div><b>وضعیت سیستم اول:</b> {g.s_a1 ? "تأیید میزبان ✓" : g.a1_veto ? "وتوی میهمان ⛔" : "آزاد (بدون وتو)"}</div>
                                 </div>
                                 <div className="bg-white p-2.5 rounded border border-sky-200">

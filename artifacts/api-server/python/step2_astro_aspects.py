@@ -29,11 +29,11 @@ import swisseph as swe
 from _lib.runner import emit_result, log
 from _lib.sheets import open_sheet
 
-INPUT_DATA_SHEET_ID = "1jw2UuFCyQLWCiPZimAmlCInu4Iq-ec149wyI6dJpK-U"
+INPUT_DATA_SHEET_ID = os.environ.get("NHL_ASTRO_INPUT_SHEET_ID", "")
 INPUT_DATA_TAB = "Data"
-INPUT_HEADER_SHEET_ID = "1CewQkD-FFuE6RAtAtosIvC2sLHmAywA4cCx1CSgVvHI"
+INPUT_HEADER_SHEET_ID = os.environ.get("NHL_ASTRO_HEADER_SHEET_ID", "")
 INPUT_HEADER_TAB = "Sheet1"
-OUTPUT_SHEET_ID = "1GCTMMwmOPpc6d3rVhY8_Tnr6lbJxiYqy62C3N2MUvBI"
+OUTPUT_SHEET_ID = os.environ.get("NHL_ASPECTS_SHEET_ID", "")
 OUTPUT_TAB = "Sheet1"
 
 EPHE_URL = "https://raw.githubusercontent.com/aloistr/swisseph/master/ephe/seas_18.se1"

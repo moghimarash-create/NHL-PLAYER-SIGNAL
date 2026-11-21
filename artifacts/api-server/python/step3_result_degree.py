@@ -74,10 +74,10 @@ def sheets_retry(fn, *args, max_retries: int = 6, base_delay: float = 1.5,
             log(f"  sheets retry {attempt + 1}/{max_retries} in {delay:.1f}s ({msg[:120]})")
             time.sleep(delay)
 
-INPUT_SPREADSHEET_ID = "1GCTMMwmOPpc6d3rVhY8_Tnr6lbJxiYqy62C3N2MUvBI"
+INPUT_SPREADSHEET_ID = os.environ.get("NHL_ASPECTS_SHEET_ID", "")
 INPUT_TAB = "Sheet1"
 
-OUTPUT_SPREADSHEET_ID = "1MqZL-5y7k5aQOYjfHdtnsRrBPviF811gnVGp8IggdtQ"
+OUTPUT_SPREADSHEET_ID = os.environ.get("NHL_RESULT_DEGREE_SHEET_ID", "")
 OUTPUT_TAB = "Sheet1"
 NODE_OUTPUT_TAB = "Node_Output"
 WEEKLY_OUTPUT_TAB = "WEEKLY-OUTPUT"
@@ -1156,7 +1156,7 @@ def run() -> None:
     # Dynamic (F, F2, F3) lookup directly from NBA-Astro_Input so Home/Away DEG2 & DEG3 flow 100% dynamically!
     _ASTRO_F_MAP = {}
     try:
-        _astro_ss = open_sheet("1jw2UuFCyQLWCiPZimAmlCInu4Iq-ec149wyI6dJpK-U")
+        _astro_ss = open_sheet(os.environ.get("NHL_ASTRO_INPUT_SHEET_ID", ""))
         for _ar in _astro_ss.sheet1.get_values("A2:K50000", value_render_option="UNFORMATTED_VALUE"):
             if len(_ar) >= 11:
                 _dt_k = str(_ar[0]).strip()

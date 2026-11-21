@@ -1,57 +1,48 @@
-# See https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files for more about ignoring files.
-
-# compiled output
+# Compiled output
 dist
 tmp
 out-tsc
 *.tsbuildinfo
-.expo
-.expo-shared
 
-# dependencies
+# Dependencies & caches
 node_modules
+.cache/
+.local/
+__pycache__/
+*.pyc
+.venv/
 
-# IDEs and editors
+# Backup, log & scratch files
+*.bak*
+*.log
+backup_*/
+attached_assets/
+
+# Replit files (excluded from NHL-PLAYER-SIGNAL)
+.replit
+.replitignore
+replit.md
+.replit-artifact/
+
+# NBA legacy bloated datasets (never commit into NHL-PLAYER-SIGNAL)
+player_nba_*.json
+nba_predictions_*.json
+nba_history_pack_*.json
+nba_players_*.json
+
+# Local runtime secrets / live trading state
+.env
+.env.*
+!.env.example
+kalshi_*_state.json
+
+# IDEs & OS
 /.idea
-.project
-.classpath
-.c9/
-*.launch
-.settings/
-*.sublime-workspace
-
-# IDE - VSCode
 .vscode/*
 !.vscode/settings.json
 !.vscode/tasks.json
 !.vscode/launch.json
 !.vscode/extensions.json
-
-# misc
-/.sass-cache
-/connect.lock
-/coverage
-/libpeerconnection.log
-npm-debug.log
-yarn-error.log
-testem.log
-/typings
-
-# System Files
 .DS_Store
 Thumbs.db
-
-.cursor/rules/nx-rules.mdc
-.github/instructions/nx.instructions.md
-
-# Replit & Local Secrets
-.cache/
-.local/
-__pycache__/
-*.pyc
-*.log
-*kalshi*_state.json
-.env
-.env.*
-
-
+.agents/

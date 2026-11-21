@@ -1,7 +1,13 @@
 {
-  "startDate": "2025-01-09",
-  "endDate": "2026-12-31",
+  "startDate": "2026-11-20",
+  "endDate": "2026-11-21",
   "utcControl": false,
-  "deg1": 53,
-  "deg2Mode": "code"
+  "deg1": 88,
+  "deg1Sign": "28 GEMINI",
+  "deg1Element": "AIR",
+  "deg2Mode": "full",
+  "appliedAt": null,
+  "rowsWritten": null,
+  "message": "NHL-PLAYER-SIGNAL Ready • DEG1 = 88 (28 GEMINI / AIR) • 32 NHL Teams",
+  "games": []
 }

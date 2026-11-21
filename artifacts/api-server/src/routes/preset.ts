@@ -1,4 +1,4 @@
-import { Router, type IRouter, type Request, type Response } from "express";
+import { Router, type IRouter } from "express";
 import { spawn } from "node:child_process";
 import crypto from "node:crypto";
 import { promises as fs } from "node:fs";
@@ -11,6 +11,10 @@ const PYTHON_DIR = path.resolve(__dirname, "..", "python");
 const DATA_DIR = path.resolve(__dirname, "../../data");
 const PRESET_FILE = path.join(DATA_DIR, "schedule_sync_state.json");
 const SCRIPT = path.join(PYTHON_DIR, "step1_apply_preset.py");
+
+export const NHL_DEG1 = 88;
+export const NHL_DEG1_SIGN = "28 GEMINI";
+export const NHL_DEG1_ELEMENT = "AIR";
 
 export type ScheduleGamePreview = {
   date: string;
@@ -38,6 +42,8 @@ export type ScheduleSyncState = {
   endDate: string;
   utcControl: boolean;
   deg1: number;
+  deg1Sign?: string;
+  deg1Element?: string;
   deg2Mode?: "full" | "code";
   appliedAt: string | null;
   rowsWritten: number | null;
@@ -49,11 +55,13 @@ export const DEFAULT_SYNC: ScheduleSyncState = {
   startDate: "2026-11-20",
   endDate: "2026-11-21",
   utcControl: false,
-  deg1: 88,
+  deg1: NHL_DEG1,
+  deg1Sign: NHL_DEG1_SIGN,
+  deg1Element: NHL_DEG1_ELEMENT,
   deg2Mode: "full",
   appliedAt: null,
-  rowsWritten: 14,
-  message: "Loaded scheduled NHL games (DEG1=88) from NHL_SCHEDULE_2025_2027",
+  rowsWritten: null,
+  message: "NHL-PLAYER-SIGNAL Ready • DEG1 = 88 (28 GEMINI / AIR) • 32 NHL Teams",
   games: [],
 };
 
@@ -62,7 +70,14 @@ const router: IRouter = Router();
 async function readState(): Promise<ScheduleSyncState> {
   try {
     const raw = await fs.readFile(PRESET_FILE, "utf-8");
-    return { ...DEFAULT_SYNC, ...JSON.parse(raw) };
+    const parsed = JSON.parse(raw);
+    return {
+      ...DEFAULT_SYNC,
+      ...parsed,
+      deg1: NHL_DEG1,
+      deg1Sign: NHL_DEG1_SIGN,
+      deg1Element: NHL_DEG1_ELEMENT,
+    };
   } catch {
     return { ...DEFAULT_SYNC };
   }
@@ -75,7 +90,13 @@ async function writeState(state: ScheduleSyncState): Promise<void> {
   await fs.rename(tmp, PRESET_FILE);
 }
 
-function runSyncScript(params: { startDate: string; endDate: string; utcControl: boolean; deg1: number; deg2Mode: "full" | "code" }): Promise<{
+function runSyncScript(params: {
+  startDate: string;
+  endDate: string;
+  utcControl: boolean;
+  deg1: number;
+  deg2Mode: "full" | "code";
+}): Promise<{
   ok: boolean;
   rowsWritten: number | null;
   message: string | null;
@@ -93,16 +114,23 @@ function runSyncScript(params: { startDate: string; endDate: string; utcControl:
       "--utc-control",
       params.utcControl ? "1" : "0",
       "--deg1",
-      String(params.deg1 || 115),
+      String(params.deg1 || NHL_DEG1),
       "--deg2-mode",
       params.deg2Mode || "full",
     ];
-    const child = spawn("python", args, { env: process.env, cwd: PYTHON_DIR });
+    const child = spawn("python3", args, { env: process.env, cwd: PYTHON_DIR });
     let out = "";
     child.stdout.on("data", (d: Buffer) => (out += d.toString()));
     child.stderr.on("data", (d: Buffer) => (out += d.toString()));
     child.on("error", (err) =>
-      resolve({ ok: false, rowsWritten: null, message: null, error: `Failed to start python: ${err.message}`, games: [], output: out }),
+      resolve({
+        ok: false,
+        rowsWritten: null,
+        message: null,
+        error: `Failed to start python3: ${err.message}`,
+        games: [],
+        output: out,
+      }),
     );
     child.on("close", (code) => {
       let parsed: {
@@ -127,7 +155,7 @@ function runSyncScript(params: { startDate: string; endDate: string; utcControl:
         ok,
         rowsWritten: parsed?.rowsWritten ?? null,
         message: parsed?.message ?? null,
-        error: ok ? null : parsed?.error ?? `python exited with code ${code}`,
+        error: ok ? null : parsed?.error ?? `python3 exited with code ${code}`,
         games: parsed?.games ?? [],
         output: out,
       });
@@ -143,14 +171,14 @@ router.get("/preset", async (_req, res): Promise<void> => {
 
 router.post("/preset/apply", async (req, res): Promise<void> => {
   const b = (req.body ?? {}) as Record<string, unknown>;
-  const startDate = String(b.startDate ?? "2026-11-01").trim();
+  const startDate = String(b.startDate ?? "2026-11-20").trim();
   const endDate = String(b.endDate ?? startDate).trim();
   const utcControl = Boolean(b.utcControl);
-  const deg1 = Number(b.deg1 ?? 115) || 115;
+  const deg1 = Number(b.deg1 ?? NHL_DEG1) || NHL_DEG1;
   const deg2Mode: "full" | "code" = b.deg2Mode === "code" ? "code" : "full";
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
-    res.status(400).json({ error: "startDate and endDate must be YYYY-MM-DD (between 2025-01-01 and 2027-04-11)" });
+    res.status(400).json({ error: "startDate and endDate must be YYYY-MM-DD" });
     return;
   }
   if (applying) {
@@ -166,6 +194,8 @@ router.post("/preset/apply", async (req, res): Promise<void> => {
       endDate,
       utcControl,
       deg1,
+      deg1Sign: NHL_DEG1_SIGN,
+      deg1Element: NHL_DEG1_ELEMENT,
       deg2Mode,
       appliedAt: result.ok ? new Date().toISOString() : prev.appliedAt,
       rowsWritten: result.rowsWritten,
@@ -184,20 +214,6 @@ router.post("/preset/apply", async (req, res): Promise<void> => {
     applying = false;
   }
 });
-
-
-router.get("/predictions", async (req, res): Promise<void> => {
-  try {
-    const mk = req.query.mode === "mode_a" || req.query.mode === "mode_b" ? String(req.query.mode) : "mode_c";
-    const file = await resolveNhlPublicFile(`player_nhl_preds_${mk}.json`);
-    const raw = await fs.readFile(file, "utf-8");
-    res.setHeader("Content-Type", "application/json; charset=utf-8");
-    res.send(raw);
-  } catch (e) {
-    res.status(500).json({ error: (e as Error).message, games: [] });
-  }
-});
-
 
 // ---------------------------------------------------------------------------
 // KALSHI NHL MONEYLINE (KXNHLGAME) AUTO-BETTING & LIVE MARKET ENGINE
@@ -304,44 +320,6 @@ function getKalshiBaseUrl(env: "live" | "demo"): string {
   return env === "demo" ? "https://demo-api.kalshi.co" : "https://api.elections.kalshi.com";
 }
 
-let marketCache: { fetchedAt: number; byTicker: Record<string, any> } = { fetchedAt: 0, byTicker: {} };
-
-async function fetchOpenKalshiNbaMarkets(force = false): Promise<Record<string, any>> {
-  const now = Date.now();
-  if (!force && now - marketCache.fetchedAt < 20000 && Object.keys(marketCache.byTicker).length > 0) {
-    return marketCache.byTicker;
-  }
-  try {
-    const url = "https://api.elections.kalshi.com/trade-api/v2/markets?series_ticker=KXNBAGAME&status=open&limit=200";
-    const resp = await fetch(url, { headers: { "User-Agent": "NBA-Signal-Dashboard/1.0" } });
-    if (!resp.ok) return marketCache.byTicker;
-    const data = (await resp.json()) as { markets?: any[] };
-    const map: Record<string, any> = {};
-    for (const m of data.markets ?? []) {
-      const yesAsk = Number(m.yes_ask_dollars ?? (m.yes_ask ? m.yes_ask / 100 : 0));
-      const yesBid = Number(m.yes_bid_dollars ?? (m.yes_bid ? m.yes_bid / 100 : 0));
-      const lastPrice = Number(m.last_price_dollars ?? (m.last_price ? m.last_price / 100 : 0));
-      map[m.ticker] = {
-        ticker: m.ticker,
-        eventTicker: m.event_ticker,
-        title: m.title,
-        yesSubTitle: m.yes_sub_title,
-        yesAsk,
-        yesBid,
-        lastPrice,
-        yesAskCents: Math.round(yesAsk * 100),
-        yesBidCents: Math.round(yesBid * 100),
-        volume: m.volume_fp ?? m.volume ?? 0,
-        status: m.status,
-      };
-    }
-    marketCache = { fetchedAt: now, byTicker: map };
-    return map;
-  } catch {
-    return marketCache.byTicker;
-  }
-}
-
 let nhlMarketCache: { fetchedAt: number; byTicker: Record<string, any> } = { fetchedAt: 0, byTicker: {} };
 
 async function fetchOpenKalshiNhlMarkets(force = false): Promise<Record<string, any>> {
@@ -351,7 +329,7 @@ async function fetchOpenKalshiNhlMarkets(force = false): Promise<Record<string, 
   }
   try {
     const url = "https://api.elections.kalshi.com/trade-api/v2/markets?series_ticker=KXNHLGAME&status=open&limit=200";
-    const resp = await fetch(url, { headers: { "User-Agent": "NBA-NHL-Signal-Dashboard/1.0" } });
+    const resp = await fetch(url, { headers: { "User-Agent": "NHL-Player-Signal-Dashboard/1.0" } });
     if (!resp.ok) return nhlMarketCache.byTicker;
     const data = (await resp.json()) as { markets?: any[] };
     const map: Record<string, any> = {};
@@ -383,13 +361,13 @@ async function fetchOpenKalshiNhlMarkets(force = false): Promise<Record<string, 
 router.get("/kalshi/nhl-markets", async (req, res): Promise<void> => {
   const force = req.query.force === "1";
   const markets = await fetchOpenKalshiNhlMarkets(force);
-  res.json({ ok: true, count: Object.keys(markets).length, markets });
+  res.json({ ok: true, series: "KXNHLGAME", deg1: NHL_DEG1, count: Object.keys(markets).length, markets });
 });
 
 router.get("/kalshi/markets", async (req, res): Promise<void> => {
   const force = req.query.force === "1";
   const markets = await fetchOpenKalshiNhlMarkets(force);
-  res.json({ ok: true, count: Object.keys(markets).length, markets });
+  res.json({ ok: true, series: "KXNHLGAME", deg1: NHL_DEG1, count: Object.keys(markets).length, markets });
 });
 
 router.get("/kalshi/state", async (_req, res): Promise<void> => {
@@ -493,14 +471,11 @@ router.post("/kalshi/save-plan", async (req, res): Promise<void> => {
 async function executeKalshiPlanOrders(
   date: string,
   orders: KalshiCardOrderPlan[],
-  mode: "dry_run" | "live"
+  mode: "dry_run" | "live",
 ): Promise<{ ok: boolean; mode: string; results: any[]; summary: any; error?: string }> {
   const st = await readKalshiState();
   const enabledOrders = orders.filter((o) => o.enabled);
-  const needsNhl = enabledOrders.some((o) => String(o.ticker ?? "").startsWith("KXNHLGAME-"));
-  const nbaMarkets = await fetchOpenKalshiNbaMarkets(true);
-  const nhlMarkets = needsNhl ? await fetchOpenKalshiNhlMarkets(true) : {};
-  const liveMarkets: Record<string, any> = { ...nbaMarkets, ...nhlMarkets };
+  const liveMarkets: Record<string, any> = await fetchOpenKalshiNhlMarkets(true);
 
   if (mode === "live" && (!st.keyId || !st.privateKeyPem)) {
     return {
@@ -510,54 +485,6 @@ async function executeKalshiPlanOrders(
       summary: {},
       error: "برای ارسال سفارش واقعی (Live)، ابتدا کلید KALSHI API Key ID و RSA Private Key را در تنظیمات Kalshi وارد و ذخیره کنید.",
     };
-  }
-
-  if (mode === "live") {
-    try {
-      const bPath = "/trade-api/v2/portfolio/balance";
-      const bTs = String(Date.now());
-      const bSig = signKalshiRequest(st.privateKeyPem, bTs, "GET", bPath);
-      const bRes = await fetch(`${getKalshiBaseUrl(st.env)}${bPath}`, {
-        headers: {
-          "KALSHI-ACCESS-KEY": st.keyId,
-          "KALSHI-ACCESS-TIMESTAMP": bTs,
-          "KALSHI-ACCESS-SIGNATURE": bSig,
-        },
-      });
-      if (bRes.ok) {
-        const bData: any = await bRes.json();
-        const bd: any[] = Array.isArray(bData?.balance_breakdown) ? bData.balance_breakdown : [];
-        const s0 = Number(bd.find((x) => x.exchange_index === 0)?.balance ?? 0);
-        const s3 = Number(bd.find((x) => x.exchange_index === 3)?.balance ?? 0);
-        const neededUsd = enabledOrders.reduce((acc, o) => acc + Number(o.stakeUsd || st.defaultStakeUsd || 3) * 1.06, 0);
-        if (s3 < neededUsd && s0 > 0.5) {
-          const transferUsd = Math.min(s0, Math.max(neededUsd - s3 + 1.0, s0));
-          const amountCenticents = Math.floor(transferUsd * 10000);
-          if (amountCenticents > 0) {
-            const tPath = "/trade-api/v2/portfolio/intra_exchange_instance_transfer";
-            const tTs = String(Date.now());
-            const tSig = signKalshiRequest(st.privateKeyPem, tTs, "POST", tPath);
-            await fetch(`${getKalshiBaseUrl(st.env)}${tPath}`, {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                "KALSHI-ACCESS-KEY": st.keyId,
-                "KALSHI-ACCESS-TIMESTAMP": tTs,
-                "KALSHI-ACCESS-SIGNATURE": tSig,
-              },
-              body: JSON.stringify({
-                source: "event_contract",
-                destination: "event_contract",
-                source_exchange_shard: 0,
-                destination_exchange_shard: 3,
-                amount: amountCenticents,
-              }),
-            });
-            await new Promise((r) => setTimeout(r, 2500));
-          }
-        }
-      }
-    } catch {}
   }
 
   const results: any[] = [];
@@ -612,12 +539,11 @@ async function executeKalshiPlanOrders(
       continue;
     }
 
-    // LIVE ORDER SUBMISSION (Kalshi V2 /trade-api/v2/portfolio/events/orders)
     try {
       const ts = String(Date.now());
       const orderPath = "/trade-api/v2/portfolio/events/orders";
       const sig = signKalshiRequest(st.privateKeyPem, ts, "POST", orderPath);
-      const clientOrderId = `nba-${date.replace(/-/g, "")}-${ord.gameNo}-${Date.now()}`;
+      const clientOrderId = `nhl-${date.replace(/-/g, "")}-${ord.gameNo}-${Date.now()}`;
       const v2Payload = {
         ticker: ord.ticker,
         side: "bid",
@@ -640,11 +566,8 @@ async function executeKalshiPlanOrders(
       const respText = await resp.text();
       let respJson: any = {};
       try { respJson = JSON.parse(respText); } catch {}
-
       const orderObj = respJson?.order ?? respJson;
       const orderId = orderObj?.order_id;
-      const fillCount = orderObj?.fill_count ?? "0.00";
-      const remainingCount = orderObj?.remaining_count ?? `${contracts}.00`;
 
       if ((resp.status === 201 || resp.status === 200) && orderId) {
         sentCount++;
@@ -727,32 +650,6 @@ router.post("/kalshi/execute", async (req, res): Promise<void> => {
   res.status(out.ok ? 200 : 400).json(out);
 });
 
-// Background 30s Auto-Scheduler for Saved Plans
-setInterval(async () => {
-  try {
-    const st = await readKalshiState();
-    if (!st.autoScheduleEnabled || !st.keyId || !st.privateKeyPem) return;
-    const nowEt = new Date(new Date().toLocaleString("en-US", { timeZone: "America/New_York" }));
-    const hh = String(nowEt.getHours()).padStart(2, "0");
-    const mm = String(nowEt.getMinutes()).padStart(2, "0");
-    const curHm = `${hh}:${mm}`;
-    if (curHm === st.autoScheduleTimeEt) {
-      for (const [planDate, planObj] of Object.entries(st.savedPlans)) {
-        const unexec = (planObj.orders ?? []).filter((o) => o.enabled && !st.ledger[`${planDate}:${o.ticker}`]);
-        if (unexec.length > 0) {
-          await executeKalshiPlanOrders(planDate, unexec, "live");
-        }
-      }
-    }
-  } catch {
-    // ignore background scheduler errors
-  }
-}, 30000);
-
-
-// ============================================================================
-// KALSHI MULTIVARIATE COMBO (PARLAY 2-4 LEGS) ENDPOINT
-// ============================================================================
 export interface KalshiComboLegInput {
   gameNo: number;
   eventTicker: string;
@@ -783,7 +680,6 @@ router.post("/kalshi/combo", async (req, res): Promise<void> => {
     return;
   }
 
-  // Compute combined probability & fair price
   const probProduct = legs.reduce((acc, l) => {
     const p = Math.min(0.98, Math.max(0.02, (Number(l.yesAskCents) || 55) / 100));
     return acc * p;
@@ -797,70 +693,8 @@ router.post("/kalshi/combo", async (req, res): Promise<void> => {
   const potentialProfitUsd = Number((maxPayoutUsd - estCostUsd).toFixed(2));
   const multiplier = Number((100 / limitCents).toFixed(2));
 
-  const st = await readKalshiState();
-  const selectedMarkets = legs.map((l) => {
-    const evTicker = l.eventTicker || l.marketTicker.split("-").slice(0, 2).join("-");
-    return {
-      event_ticker: evTicker,
-      market_ticker: l.marketTicker,
-      side: "yes",
-    };
-  });
-
-  // Try to mint / look up official Kalshi Multivariate Combo Market if key is configured
-  const isNhlCombo = legs.some((l) => String(l.marketTicker ?? "").startsWith("KXNHLGAME-"));
-  const comboSportUpper = isNhlCombo ? "NHL" : "NBA";
-  let mveMarketTicker = `KXMVE-${comboSportUpper}-${date.replace(/-/g, "")}-${legs.map((l) => l.marketTicker.split("-").pop()).join("-")}`;
-  let mveEventTicker = `KXMVE-${comboSportUpper}-${date.replace(/-/g, "")}`;
-  let mveExchangeIndex = 1;
-  let mveLiveAskCents: number | null = null;
-  let mveLiveBidCents: number | null = null;
-  let mveCreated = false;
-  let mveLookupNote = "";
-
-  if (st.keyId && st.privateKeyPem) {
-    try {
-      const colPath = "/trade-api/v2/multivariate_event_collections/KXMVESPORTSMULTIGAMEEXTENDED-R";
-      const ts = String(Date.now());
-      const sig = signKalshiRequest(st.privateKeyPem, ts, "POST", colPath);
-      const colRes = await fetch(`${getKalshiBaseUrl(st.env)}${colPath}`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "KALSHI-ACCESS-KEY": st.keyId,
-          "KALSHI-ACCESS-TIMESTAMP": ts,
-          "KALSHI-ACCESS-SIGNATURE": sig,
-        },
-        body: JSON.stringify({
-          selected_markets: selectedMarkets,
-          with_market_payload: true,
-        }),
-      });
-      const colTxt = await colRes.text();
-      let colJson: any = {};
-      try { colJson = JSON.parse(colTxt); } catch {}
-      if (colRes.ok && colJson?.market_ticker) {
-        mveMarketTicker = String(colJson.market_ticker);
-        mveEventTicker = String(colJson.event_ticker ?? mveEventTicker);
-        mveCreated = true;
-        if (colJson?.market) {
-          if (typeof colJson.market.exchange_index === "number") {
-            mveExchangeIndex = colJson.market.exchange_index;
-          }
-          if (colJson.market.yes_ask_dollars) {
-            mveLiveAskCents = Math.round(Number(colJson.market.yes_ask_dollars) * 100);
-          }
-          if (colJson.market.yes_bid_dollars) {
-            mveLiveBidCents = Math.round(Number(colJson.market.yes_bid_dollars) * 100);
-          }
-        }
-      } else {
-        mveLookupNote = colJson?.error?.message ?? colJson?.message ?? colTxt.slice(0, 140);
-      }
-    } catch (e) {
-      mveLookupNote = (e as Error).message;
-    }
-  }
+  const mveMarketTicker = `KXMVE-NHL-${date.replace(/-/g, "")}-${legs.map((l) => l.marketTicker.split("-").pop()).join("-")}`;
+  const mveEventTicker = `KXMVE-NHL-${date.replace(/-/g, "")}`;
 
   if (mode === "dry_run") {
     res.json({
@@ -869,115 +703,35 @@ router.post("/kalshi/combo", async (req, res): Promise<void> => {
       date,
       comboTicker: mveMarketTicker,
       comboEventTicker: mveEventTicker,
-      mveCreated,
-      mveLookupNote,
+      mveCreated: false,
+      mveLookupNote: "",
       legs,
       fairCents,
       limitCents,
-      mveLiveAskCents,
-      mveLiveBidCents,
+      mveLiveAskCents: null,
+      mveLiveBidCents: null,
       stakeUsd,
       contracts,
       estCostUsd,
       maxPayoutUsd,
       potentialProfitUsd,
       multiplier,
-      message: mveCreated
-        ? `تیکر رسمی کمبوی ${legs.length} بازی در Kalshi ساخته/استعلام شد: ${mveMarketTicker} • خرید ${contracts} قرارداد @ ${limitCents}¢ (ضریب ${multiplier}x • هزینه $${estCostUsd} • سود خالص برد: +$${potentialProfitUsd})`
-        : `پیش‌نمایش کمبوی ${legs.length} بازی آماده است • خرید ${contracts} قرارداد @ ${limitCents}¢ (ضریب ${multiplier}x • هزینه $${estCostUsd} • سود خالص برد: +$${potentialProfitUsd})`,
+      message: `پیش‌نمایش کمبوی ${legs.length} بازی هاکی NHL آماده است • خرید ${contracts} قرارداد @ ${limitCents}¢ (ضریب ${multiplier}x • هزینه $${estCostUsd} • سود خالص برد: +$${potentialProfitUsd})`,
     });
     return;
   }
 
+  const st = await readKalshiState();
   if (!st.keyId || !st.privateKeyPem) {
-    res.status(400).json({
-      ok: false,
-      error: "کلید Kalshi API در سرور تنظیم نشده است.",
-    });
+    res.status(400).json({ ok: false, error: "کلید Kalshi API در سرور تنظیم نشده است." });
     return;
   }
-
-  // Ensure shard balance on target mveExchangeIndex
-  try {
-    const bPath = "/trade-api/v2/portfolio/balance";
-    const bTs = String(Date.now());
-    const bSig = signKalshiRequest(st.privateKeyPem, bTs, "GET", bPath);
-    const bRes = await fetch(`${getKalshiBaseUrl(st.env)}${bPath}`, {
-      headers: {
-        "KALSHI-ACCESS-KEY": st.keyId,
-        "KALSHI-ACCESS-TIMESTAMP": bTs,
-        "KALSHI-ACCESS-SIGNATURE": bSig,
-      },
-    });
-    if (bRes.ok) {
-      const bData: any = await bRes.json();
-      const bd: any[] = Array.isArray(bData?.balance_breakdown) ? bData.balance_breakdown : [];
-      const curShardBal = Number(bd.find((x) => x.exchange_index === mveExchangeIndex)?.balance ?? 0);
-      if (curShardBal < estCostUsd * 1.20 + 0.5) {
-        // Find any shard with available balance
-        const donor = bd.find((x) => x.exchange_index !== mveExchangeIndex && Number(x.balance) >= 1);
-        if (donor) {
-          const transferUsd = Math.min(Number(donor.balance), Math.max(estCostUsd * 1.25 - curShardBal + 1.5, 5));
-          const amountCenticents = Math.floor(transferUsd * 10000);
-          if (amountCenticents > 0) {
-            const tPath = "/trade-api/v2/portfolio/intra_exchange_instance_transfer";
-            const tTs = String(Date.now());
-            const tSig = signKalshiRequest(st.privateKeyPem, tTs, "POST", tPath);
-            await fetch(`${getKalshiBaseUrl(st.env)}${tPath}`, {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                "KALSHI-ACCESS-KEY": st.keyId,
-                "KALSHI-ACCESS-TIMESTAMP": tTs,
-                "KALSHI-ACCESS-SIGNATURE": tSig,
-              },
-              body: JSON.stringify({
-                source: "event_contract",
-                destination: "event_contract",
-                source_exchange_shard: donor.exchange_index,
-                destination_exchange_shard: mveExchangeIndex,
-                amount: amountCenticents,
-              }),
-            });
-            await new Promise((r) => setTimeout(r, 2000));
-          }
-        }
-      }
-    }
-  } catch {}
-
-  // Submit RFQ + Place V2 Limit Order on the MVE Combo Market
-  let rfqId: string | null = null;
-  try {
-    const rfqPath = "/trade-api/v2/communications/rfqs";
-    const rfqTs = String(Date.now());
-    const rfqSig = signKalshiRequest(st.privateKeyPem, rfqTs, "POST", rfqPath);
-    const rfqRes = await fetch(`${getKalshiBaseUrl(st.env)}${rfqPath}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "KALSHI-ACCESS-KEY": st.keyId,
-        "KALSHI-ACCESS-TIMESTAMP": rfqTs,
-        "KALSHI-ACCESS-SIGNATURE": rfqSig,
-      },
-      body: JSON.stringify({
-        market_ticker: mveMarketTicker,
-        target_cost_dollars: estCostUsd.toFixed(2),
-        rest_remainder: true,
-        replace_existing: false,
-      }),
-    });
-    if (rfqRes.ok) {
-      const rfqJson: any = await rfqRes.json();
-      rfqId = rfqJson?.id ? String(rfqJson.id) : null;
-    }
-  } catch {}
 
   try {
     const orderPath = "/trade-api/v2/portfolio/events/orders";
     const oTs = String(Date.now());
     const oSig = signKalshiRequest(st.privateKeyPem, oTs, "POST", orderPath);
-    const clientOrderId = `${isNhlCombo ? "nhl" : "nba"}-combo-${date.replace(/-/g, "")}-${Date.now()}`;
+    const clientOrderId = `nhl-combo-${date.replace(/-/g, "")}-${Date.now()}`;
     const v2Payload = {
       ticker: mveMarketTicker,
       side: "bid",
@@ -1002,7 +756,6 @@ router.post("/kalshi/combo", async (req, res): Promise<void> => {
     try { oJson = JSON.parse(oTxt); } catch {}
     const orderObj = oJson?.order ?? oJson;
     const orderId = orderObj?.order_id;
-
     if ((oRes.status === 201 || oRes.status === 200) && orderId) {
       st.ledger[`${date}:COMBO:${mveMarketTicker}`] = {
         orderId: String(orderId),
@@ -1021,7 +774,6 @@ router.post("/kalshi/combo", async (req, res): Promise<void> => {
         mode: "live",
         status: "EXECUTED",
         orderId,
-        rfqId,
         comboTicker: mveMarketTicker,
         legs,
         contracts,
@@ -1030,16 +782,14 @@ router.post("/kalshi/combo", async (req, res): Promise<void> => {
         maxPayoutUsd,
         potentialProfitUsd,
         multiplier,
-        message: `سفارش کمبوی ${legs.length} بازی با موفقیت در Kalshi ثبت شد ✓ (Order ID: ${orderId}${rfqId ? ` • RFQ: ${rfqId}` : ""})`,
+        message: `سفارش کمبوی ${legs.length} بازی NHL با موفقیت در Kalshi ثبت شد ✓ (Order ID: ${orderId})`,
       });
       return;
     }
-
     res.json({
       ok: false,
       mode: "live",
       status: `ERROR_${oRes.status}`,
-      rfqId,
       comboTicker: mveMarketTicker,
       legs,
       contracts,
@@ -1051,15 +801,11 @@ router.post("/kalshi/combo", async (req, res): Promise<void> => {
       message: oJson?.error?.message ?? oJson?.message ?? oTxt.slice(0, 180),
     });
   } catch (err) {
-    res.status(500).json({
-      ok: false,
-      error: (err as Error).message,
-    });
+    res.status(500).json({ ok: false, error: (err as Error).message });
   }
 });
 
-
-router.get("/kalshi/audit", async (_req: Request, res: Response) => {
+router.get("/kalshi/audit", async (_req, res): Promise<void> => {
   try {
     const st = await readKalshiState();
     if (!st.keyId || !st.privateKeyPem) {
@@ -1091,15 +837,15 @@ router.get("/kalshi/audit", async (_req: Request, res: Response) => {
 });
 
 // ---------------------------------------------------------------------------
-// NHL PLAYER SIGNAL (DEG1 = 88 • 13-PLAYER LINEUP) ENDPOINTS
+// NHL-PLAYER-SIGNAL (DEG1 = 88 • 28 GEMINI / AIR) ENDPOINTS & LOCAL BACKUPS
 // ---------------------------------------------------------------------------
 
 async function resolveNhlPublicFile(filename: string): Promise<string> {
   const candidates = [
     path.resolve(__dirname, "../../calc-dashboard/public", filename),
     path.resolve(__dirname, "../../../calc-dashboard/public", filename),
-    path.resolve(process.cwd(), "artifacts/calc-dashboard/public", filename),
     path.join(DATA_DIR, filename),
+    path.join(PYTHON_DIR, filename),
   ];
   for (const p of candidates) {
     try {
@@ -1110,35 +856,108 @@ async function resolveNhlPublicFile(filename: string): Promise<string> {
   return candidates[0];
 }
 
-router.get("/nhl/predictions", async (req, res): Promise<void> => {
+function normalizeModeParam(raw: unknown): "mode_c" | "mode_b" | "mode_a" {
+  const m = String(raw ?? "mode_c").trim().toLowerCase();
+  if (m === "mode_a" || m === "mode_b" || m === "mode_c") return m;
+  return "mode_c";
+}
+
+router.get("/nhl/config", async (_req, res): Promise<void> => {
+  const inId = (process.env.NHL_PLAYER_INPUT_SHEET_ID ?? "").trim();
+  const calcId = (process.env.NHL_PLAYER_CALC_SHEET_ID ?? "").trim();
+  res.json({
+    ok: true,
+    league: "NHL",
+    project: "NHL-PLAYER-SIGNAL",
+    teamsCount: 32,
+    deg1: NHL_DEG1,
+    deg1Sign: NHL_DEG1_SIGN,
+    deg1Element: NHL_DEG1_ELEMENT,
+    excludedStatuses: ["OUT", "IR", "IR-LT", "IR-NR", "Suspension"],
+    inputSheetId: inId || null,
+    calcSheetId: calcId || null,
+    inputSheetUrl: inId ? `https://docs.google.com/spreadsheets/d/${inId}/edit` : "/api/nhl/players-gem",
+    calcSheetUrl: calcId ? `https://docs.google.com/spreadsheets/d/${calcId}/edit` : "/api/nhl/sheet-backup?kind=calc",
+    usingLocalJsonBackup: !inId || !calcId,
+  });
+});
+
+router.get("/predictions", async (req, res): Promise<void> => {
   try {
-    const mk = req.query.mode === "mode_a" || req.query.mode === "mode_b" ? String(req.query.mode) : "mode_c";
-    const file = await resolveNhlPublicFile(`player_nhl_preds_${mk}.json`);
+    const mode = normalizeModeParam(req.query.mode);
+    const file = await resolveNhlPublicFile(`player_nhl_preds_${mode}.json`);
     const raw = await fs.readFile(file, "utf-8");
     res.setHeader("Content-Type", "application/json; charset=utf-8");
     res.send(raw);
   } catch (e) {
-    res.status(500).json({ ok: false, error: (e as Error).message, games: [] });
+    res.status(500).json({ ok: false, deg1: NHL_DEG1, error: (e as Error).message, games: [] });
+  }
+});
+
+router.get("/nhl/predictions", async (req, res): Promise<void> => {
+  try {
+    const mode = normalizeModeParam(req.query.mode);
+    const file = await resolveNhlPublicFile(`player_nhl_preds_${mode}.json`);
+    const raw = await fs.readFile(file, "utf-8");
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    res.send(raw);
+  } catch (e) {
+    res.status(500).json({ ok: false, deg1: NHL_DEG1, error: (e as Error).message, games: [] });
   }
 });
 
 router.get("/nhl/history-pack", async (req, res): Promise<void> => {
   try {
-    const mk = req.query.mode === "mode_a" || req.query.mode === "mode_b" ? String(req.query.mode) : "mode_c";
-    const file = await resolveNhlPublicFile(`player_nhl_hist_${mk}.json`);
+    const mode = normalizeModeParam(req.query.mode);
+    const file = await resolveNhlPublicFile(`player_nhl_hist_${mode}.json`);
     const raw = await fs.readFile(file, "utf-8");
     res.setHeader("Content-Type", "application/json; charset=utf-8");
     res.send(raw);
   } catch (e) {
-    res.status(500).json({ ok: false, error: (e as Error).message });
+    res.status(500).json({ ok: false, deg1: NHL_DEG1, error: (e as Error).message });
+  }
+});
+
+router.get("/nhl/players-gem", async (_req, res): Promise<void> => {
+  try {
+    const file = await resolveNhlPublicFile("nhl_players_gem.json");
+    const raw = await fs.readFile(file, "utf-8");
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    res.send(raw);
+  } catch (e) {
+    res.status(500).json({ ok: false, deg1: NHL_DEG1, error: (e as Error).message });
+  }
+});
+
+router.get("/nhl/teams-gem", async (_req, res): Promise<void> => {
+  try {
+    const file = await resolveNhlPublicFile("nhl_gem_sheet.json");
+    const raw = await fs.readFile(file, "utf-8");
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    res.send(raw);
+  } catch (e) {
+    res.status(500).json({ ok: false, deg1: NHL_DEG1, error: (e as Error).message });
+  }
+});
+
+router.get("/nhl/sheet-backup", async (req, res): Promise<void> => {
+  try {
+    const kind = String(req.query.kind ?? "calc").toLowerCase() === "input" ? "input" : "calc";
+    const fname = kind === "input" ? "nhl_sheet_input_backup.json" : "nhl_sheet_calc_backup.json";
+    const file = await resolveNhlPublicFile(fname);
+    const raw = await fs.readFile(file, "utf-8");
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    res.send(raw);
+  } catch (e) {
+    res.status(500).json({ ok: false, deg1: NHL_DEG1, error: (e as Error).message });
   }
 });
 
 let nhlSyncing = false;
 
-async function handleNhlLiveSync(req: Request, res: Response): Promise<void> {
+router.post("/nhl/sync", async (req, res): Promise<void> => {
   if (nhlSyncing) {
-    res.status(409).json({ ok: false, error: "بروزرسانی نتایج واقعی NHL در حال انجام است." });
+    res.status(409).json({ ok: false, error: "بروزرسانی نتایج واقعی هاکی NHL در حال انجام است." });
     return;
   }
   const b = (req.body ?? {}) as Record<string, unknown>;
@@ -1151,7 +970,6 @@ async function handleNhlLiveSync(req: Request, res: Response): Promise<void> {
     const scriptCandidates = [
       path.resolve(__dirname, "../../python/nhl_live_sync.py"),
       path.resolve(__dirname, "../python/nhl_live_sync.py"),
-      path.resolve(process.cwd(), "artifacts/api-server/python/nhl_live_sync.py"),
     ];
     let scriptPath = scriptCandidates[0];
     for (const sc of scriptCandidates) {
@@ -1187,17 +1005,11 @@ async function handleNhlLiveSync(req: Request, res: Response): Promise<void> {
     if (out.code === 0 && parsed?.ok) {
       res.json(parsed);
     } else {
-      res.status(500).json({ ok: false, error: out.stdout.slice(-600) || `Exited ${out.code}` });
+      res.status(500).json({ ok: false, deg1: NHL_DEG1, error: out.stdout.slice(-600) || `Exited ${out.code}` });
     }
   } finally {
     nhlSyncing = false;
   }
-}
-
-router.post("/nhl/sync", handleNhlLiveSync);
-router.post("/nba/sync", handleNhlLiveSync);
+});
 
 export default router;
-
-
-

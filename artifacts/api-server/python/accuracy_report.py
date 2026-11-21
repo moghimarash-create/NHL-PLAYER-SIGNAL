@@ -36,8 +36,8 @@ import google.auth.transport.requests
 from google.oauth2.service_account import Credentials
 
 # Spreadsheet IDs (match steps-config.ts / step4_search_signals.py).
-PREDICTION_FINAL_ID = "1KlO8ooyXURexeDqNN8KVFGflNBaX7HIj8GCLk9-WY4o"
-FINAL_SIGNAL_ID = "1RX-sKBwgt3KghRH-CuL_fCOmJND6dKnx1ORX44SkOfc"
+PREDICTION_FINAL_ID = os.environ.get("NHL_PREDICTION_FINAL_SHEET_ID", "")
+FINAL_SIGNAL_ID = os.environ.get("NHL_FINAL_SIGNAL_SHEET_ID", "")
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
 
